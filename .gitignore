@@ -1,3 +1,8 @@
 # Only necessary if you are running the script directly with Bundled set to False.
 BDO_Vulkan_API/
+
+# Ignore build artifacts and distribution files
+dist/
+build/
 *.zip
+*.spec

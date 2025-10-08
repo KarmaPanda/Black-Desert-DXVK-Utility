@@ -1,10 +1,18 @@
 # bdo_vulkan_manager.py
-import ctypes, os, sys, shutil, string, logging, subprocess
+import ctypes
+import os
+import sys
+import shutil
+import string
+import logging
+import subprocess
 from pathlib import Path
 import configparser
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import base64
+import tempfile
+import atexit
 
 # ==========================
 # BUILD-TIME SWITCH
@@ -15,12 +23,14 @@ BUNDLED = True   # <<< SET THIS: True = bundle assets via --add-data, False = us
 # Runtime context & paths
 # ==========================
 FROZEN = getattr(sys, "frozen", False)
-APP_DIR   = (Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent)
-MEIPASS_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR)).resolve()  # where PyInstaller unpacks data
+APP_DIR = (Path(sys.executable).resolve(
+).parent if FROZEN else Path(__file__).resolve().parent)
+# where PyInstaller unpacks data
+MEIPASS_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR)).resolve()
 
 CONFIG_FILE = APP_DIR / "bdovulkan_config.ini"
-CACHE_FILE  = APP_DIR / "bdovulkan_installs.txt"
-ICON_FILE   = "BlackDesert.ico"  # searched in APP_DIR and MEIPASS_DIR
+CACHE_FILE = APP_DIR / "bdovulkan_installs.txt"
+ICON_FILE = "BlackDesert.ico"  # searched in APP_DIR and MEIPASS_DIR
 
 SOURCE_ROOT = APP_DIR / "BDO_Vulkan_API"   # used when BUNDLED=False
 ASSETS_NORMAL_REL = Path("assets/Normal")  # used when BUNDLED=True
@@ -44,6 +54,8 @@ COMMON_RELATIVE_PATHS = [
 # ==========================
 # Config (debug) + console
 # ==========================
+
+
 def load_config():
     cfg = configparser.ConfigParser()
     cfg["general"] = {"debug": "false"}
@@ -54,13 +66,16 @@ def load_config():
             pass
     else:
         try:
-            CONFIG_FILE.write_text("[general]\ndebug = false\n", encoding="utf-8")
+            CONFIG_FILE.write_text(
+                "[general]\ndebug = false\n", encoding="utf-8")
         except Exception:
             pass
     return cfg
 
+
 CFG = load_config()
 DEBUG = CFG.getboolean("general", "debug", fallback=False)
+
 
 def _attach_debug_console_if_needed():
     if not DEBUG:
@@ -75,6 +90,7 @@ def _attach_debug_console_if_needed():
             sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
         except Exception:
             pass
+
 
 _attach_debug_console_if_needed()
 
@@ -101,6 +117,7 @@ ICON_PNG_B64 = (
 
 _APP_ICON_PHOTO = None  # keep a global reference so it doesn't get GC'd
 
+
 def _find_ico_path() -> Path | None:
     # 1) Next to exe/script
     p = APP_DIR / ICON_FILE
@@ -112,6 +129,7 @@ def _find_ico_path() -> Path | None:
         return p
     return None
 
+
 def _load_photo_from_b64_png():
     global _APP_ICON_PHOTO
     try:
@@ -119,6 +137,7 @@ def _load_photo_from_b64_png():
         return _APP_ICON_PHOTO
     except Exception:
         return None
+
 
 def setup_app_icon(win: tk.Misc):
     """Set both iconbitmap (.ico) and wm_iconphoto (PNG) safely."""
@@ -135,6 +154,7 @@ def setup_app_icon(win: tk.Misc):
         except Exception:
             pass
 
+
 def new_window(title: str, geometry: tuple[int, int] | None = None) -> tk.Toplevel:
     w = tk.Toplevel(ROOT)
     setup_app_icon(w)
@@ -147,6 +167,7 @@ def new_window(title: str, geometry: tuple[int, int] | None = None) -> tk.Toplev
         w.geometry(f"{width}x{height}+{x}+{y}")
     return w
 
+
 # ==========================
 # Single hidden root
 # ==========================
@@ -158,19 +179,25 @@ setup_app_icon(ROOT)
 # ==========================
 # UAC helpers
 # ==========================
+
+
 def is_admin() -> bool:
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
         return False
 
+
 def relaunch_as_admin():
     params = " ".join([f'"{p}"' for p in sys.argv[1:]])
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{__file__}" {params}', None, 1)
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, f'"{__file__}" {params}', None, 1)
 
 # ==========================
 # Game-running guard
 # ==========================
+
+
 def is_process_running(image_name: str) -> bool:
     """
     Uses 'tasklist' to detect a running process by image name (e.g., BlackDesert64.exe).
@@ -188,6 +215,7 @@ def is_process_running(image_name: str) -> bool:
         log.debug(f"[PROC] tasklist failed: {e}")
         return False
 
+
 def guard_game_not_running_or_exit():
     if is_process_running(GAME_EXE):
         # Make a small topmost dialog to ensure it's seen
@@ -201,32 +229,46 @@ def guard_game_not_running_or_exit():
 # ==========================
 # Progress dialog
 # ==========================
+
+
 class ProgressDialog:
     def __init__(self, title="Scanning...", initial="Starting..."):
         self.cancelled = False
         self.win = new_window(title, geometry=(520, 140))
         self.win.resizable(False, False)
-        self.label = tk.Label(self.win, text=initial, width=62, anchor="w", justify="left")
+        self.label = tk.Label(self.win, text=initial,
+                              width=62, anchor="w", justify="left")
         self.label.pack(padx=14, pady=(12, 6))
         self.pb = ttk.Progressbar(self.win, mode="indeterminate", length=440)
         self.pb.pack(padx=14, pady=(0, 8))
         self.pb.start(40)
-        tk.Button(self.win, text="Cancel", width=12, command=self._on_cancel).pack(pady=(0, 10))
+        tk.Button(self.win, text="Cancel", width=12,
+                  command=self._on_cancel).pack(pady=(0, 10))
         self.win.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
     def _on_cancel(self): self.cancelled = True
-    def update_status(self, text: str): self.label.config(text=text); self.win.update()
+
+    def update_status(self, text: str): self.label.config(
+        text=text); self.win.update()
+
     def close(self):
-        try: self.pb.stop()
-        except Exception: pass
-        try: self.win.destroy()
-        except Exception: pass
+        try:
+            self.pb.stop()
+        except Exception:
+            pass
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
 
 # ==========================
 # Asset handling (bundled vs non-bundled)
 # ==========================
+
+
 def _bundle_path(rel: Path) -> Path:
     return (MEIPASS_DIR / rel).resolve()
+
 
 def copy_tree(src: Path, dst: Path):
     for root, dirs, files in os.walk(src):
@@ -240,43 +282,65 @@ def copy_tree(src: Path, dst: Path):
             except Exception as e:
                 log.debug(f"[ASSETS] Copy failed {s} -> {d}: {e}")
 
+
 def ensure_source_for_mode(mode: str) -> str | None:
     """
     Returns source folder path for selected mode.
-    - BUNDLED=True: copy from bundled assets (assets/<Mode>) into ./BDO_Vulkan_API/<Mode> if empty/missing.
+    - BUNDLED=True: copy from bundled assets (assets/<Mode>) into a temp dir.
     - BUNDLED=False: use ./BDO_Vulkan_API/<Mode>; if empty/missing, prompt user to pick.
     """
-    target_dir = SOURCE_ROOT / mode
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     if BUNDLED:
         rel = ASSETS_NORMAL_REL if mode.lower() == "normal" else ASSETS_POTATO_REL
         bundled_src = _bundle_path(rel)
-        has_files = any(target_dir.rglob("*"))
-        if not has_files:
-            if bundled_src.exists():
-                log.debug(f"[ASSETS] Extracting bundled {mode} -> {target_dir}")
-                copy_tree(bundled_src, target_dir)
-            else:
-                messagebox.showinfo(
-                    "Source Missing",
-                    f"No embedded files found for '{mode}'.\n\nSelect the source folder manually.",
-                    parent=ROOT
-                )
-                chosen = filedialog.askdirectory(parent=ROOT, title="Select the SOURCE folder (files to manage)", mustexist=True)
-                return chosen or None
-        return str(target_dir)
+
+        if not bundled_src.exists():
+            messagebox.showinfo(
+                "Source Missing",
+                f"No embedded files found for '{mode}'.\n\nSelect the source folder manually.",
+                parent=ROOT
+            )
+            chosen = filedialog.askdirectory(
+                parent=ROOT,
+                title="Select the SOURCE folder (files to manage)",
+                mustexist=True
+            )
+            return chosen or None
+
+        # Extract to a temporary folder
+        tempdir = Path(tempfile.mkdtemp(prefix=f"bdo_vulkan_{mode.lower()}_"))
+        log.debug(f"[ASSETS] Extracting bundled {mode} -> {tempdir}")
+        copy_tree(bundled_src, tempdir)
+
+        # Ensure cleanup on exit
+        def cleanup_temp():
+            try:
+                shutil.rmtree(tempdir, ignore_errors=True)
+                log.debug(f"[ASSETS] Cleaned up temp dir {tempdir}")
+            except Exception as e:
+                log.debug(f"[ASSETS] Failed to clean temp dir {tempdir}: {e}")
+
+        atexit.register(cleanup_temp)
+        return str(tempdir)
+
     else:
-        has_files = any(target_dir.rglob("*"))
+        # Non-bundled mode: look for ./BDO_Vulkan_API/<Mode>
+        target_dir = SOURCE_ROOT / mode
+        has_files = target_dir.exists() and any(target_dir.rglob("*"))
         if has_files:
             return str(target_dir)
+
         messagebox.showinfo(
             "Source Missing",
             f"Default source not found or empty:\n{target_dir}\n\nPlease select the source folder manually.",
             parent=ROOT
         )
-        chosen = filedialog.askdirectory(parent=ROOT, title="Select the SOURCE folder (files to manage)", mustexist=True)
+        chosen = filedialog.askdirectory(
+            parent=ROOT,
+            title="Select the SOURCE folder (files to manage)",
+            mustexist=True
+        )
         return chosen or None
+
 
 # ==========================
 # Drive discovery & scan
@@ -297,6 +361,7 @@ def get_drives():
     log.debug(f"Detected drives: {drives}")
     return drives
 
+
 def quick_search_on_drive(drive_root: str, dlg: ProgressDialog | None = None):
     found = []
     for rel in COMMON_RELATIVE_PATHS:
@@ -315,9 +380,11 @@ def quick_search_on_drive(drive_root: str, dlg: ProgressDialog | None = None):
             log.debug(f"[QUICK] Error at {candidate}: {e}")
     return found
 
+
 def deep_scan_drive(drive_root: str, dlg: ProgressDialog | None = None):
     found = []
-    skip_dirs = {"System Volume Information", "$Recycle.Bin", "Windows", "Recovery", "PerfLogs"}
+    skip_dirs = {"System Volume Information",
+                 "$Recycle.Bin", "Windows", "Recovery", "PerfLogs"}
     scanned_dirs = 0
     for root, dirs, files in os.walk(drive_root, topdown=True, followlinks=False):
         if dlg and dlg.cancelled:
@@ -325,16 +392,20 @@ def deep_scan_drive(drive_root: str, dlg: ProgressDialog | None = None):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         scanned_dirs += 1
         if dlg and scanned_dirs % 100 == 0:
-            dlg.update_status(f"Scanning {drive_root} (deep)\nDirs scanned: {scanned_dirs}")
+            dlg.update_status(
+                f"Scanning {drive_root} (deep)\nDirs scanned: {scanned_dirs}")
         if GAME_EXE in files:
             log.debug(f"[DEEP] Found at {root}")
             found.append(root)
     if dlg and not dlg.cancelled:
-        dlg.update_status(f"Scanning {drive_root} (deep) complete\nDirs scanned: {scanned_dirs}")
+        dlg.update_status(
+            f"Scanning {drive_root} (deep) complete\nDirs scanned: {scanned_dirs}")
     return found
 
+
 def scan_all_installs_with_progress():
-    dlg = ProgressDialog(title="Scanning for Black Desert", initial="Detecting drives...")
+    dlg = ProgressDialog(title="Scanning for Black Desert",
+                         initial="Detecting drives...")
     installs, seen = [], set()
     try:
         for drv in get_drives():
@@ -343,16 +414,20 @@ def scan_all_installs_with_progress():
             dlg.update_status(f"Scanning {drv} (quick)")
             for p in quick_search_on_drive(drv, dlg):
                 if p not in seen:
-                    installs.append(p); seen.add(p)
+                    installs.append(p)
+                    seen.add(p)
             if not any(str(p).startswith(drv) for p in installs):
                 if dlg.cancelled:
                     break
-                dlg.update_status(f"Scanning {drv} (deep)\nThis may take a while…")
+                dlg.update_status(
+                    f"Scanning {drv} (deep)\nThis may take a while…")
                 for p in deep_scan_drive(drv, dlg):
                     if p not in seen:
-                        installs.append(p); seen.add(p)
+                        installs.append(p)
+                        seen.add(p)
             else:
-                log.debug(f"[SCAN] Skipping deep scan on {drv}: found in quick pass.")
+                log.debug(
+                    f"[SCAN] Skipping deep scan on {drv}: found in quick pass.")
     finally:
         dlg.close()
     log.debug(f"Scan complete. Found installs: {installs}")
@@ -361,6 +436,8 @@ def scan_all_installs_with_progress():
 # ==========================
 # Cache
 # ==========================
+
+
 def load_cache():
     paths = []
     if CACHE_FILE.exists():
@@ -376,6 +453,7 @@ def load_cache():
     log.debug(f"[CACHE] Loaded: {paths}")
     return paths
 
+
 def write_cache(paths):
     try:
         uniq = sorted(dict.fromkeys(paths))
@@ -387,6 +465,8 @@ def write_cache(paths):
 # ==========================
 # UI helpers
 # ==========================
+
+
 def choose_source_mode():
     win = new_window("Select Source Mode", geometry=(420, 150))
     # Extra insurance: re-apply the icon here (addresses rare cases on some systems)
@@ -402,22 +482,29 @@ def choose_source_mode():
     win.protocol("WM_DELETE_WINDOW", on_cancel)
     win.bind("<Escape>", lambda e: on_cancel())
 
-    tk.Label(win, text="Choose which source to use:").pack(padx=14, pady=(12, 6))
+    tk.Label(win, text="Choose which source to use:").pack(
+        padx=14, pady=(12, 6))
 
-    btns = tk.Frame(win); btns.pack(pady=(6, 2))
+    btns = tk.Frame(win)
+    btns.pack(pady=(6, 2))
     def set_mode(m): state["mode"] = m; win.destroy()
-    tk.Button(btns, text="Normal", width=14, command=lambda: set_mode("Normal")).pack(side="left", padx=8)
-    tk.Button(btns, text="Potato", width=14, command=lambda: set_mode("Potato")).pack(side="left", padx=8)
+    tk.Button(btns, text="Normal", width=14, command=lambda: set_mode(
+        "Normal")).pack(side="left", padx=8)
+    tk.Button(btns, text="Potato", width=14, command=lambda: set_mode(
+        "Potato")).pack(side="left", padx=8)
 
     # footer credits
-    foot = tk.Frame(win); foot.pack(pady=(2, 8), fill="x")
+    foot = tk.Frame(win)
+    foot.pack(pady=(2, 8), fill="x")
     tk.Label(foot, text=APP_TITLE, anchor="w").pack(side="left", padx=12)
 
-    win.grab_set(); win.wait_window()
+    win.grab_set()
+    win.wait_window()
 
     if state["cancelled"]:
         return None
     return state["mode"] or "Normal"
+
 
 def browse_folder(prompt: str):
     path = filedialog.askdirectory(parent=ROOT, title=prompt, mustexist=True)
@@ -425,51 +512,69 @@ def browse_folder(prompt: str):
         log.debug(f"[UI] Folder chosen: {path}")
     return path or ""
 
-def select_installs_dialog(paths):
-    win = new_window("Select Black Desert Installation(s)", geometry=(840, 520))
-    tk.Label(win, text="Select one or more installations:").pack(padx=12, pady=8, anchor="w")
 
-    lb = tk.Listbox(win, selectmode=tk.MULTIPLE, exportselection=False, font=("Consolas", 10))
+def select_installs_dialog(paths):
+    win = new_window("Select Black Desert Installation(s)",
+                     geometry=(840, 520))
+    tk.Label(win, text="Select one or more installations:").pack(
+        padx=12, pady=8, anchor="w")
+
+    lb = tk.Listbox(win, selectmode=tk.MULTIPLE,
+                    exportselection=False, font=("Consolas", 10))
     lb.pack(fill="both", expand=True, padx=12)
     for p in sorted(paths):
         lb.insert(tk.END, p)
 
     state = {"mode": None, "sel_idx": []}
-    bar = tk.Frame(win); bar.pack(pady=10)
+    bar = tk.Frame(win)
+    bar.pack(pady=10)
 
     def select_all(): lb.select_set(0, tk.END)
     def clear_sel(): lb.select_clear(0, tk.END)
+
     def ensure_sel():
         if not lb.curselection():
-            messagebox.showinfo("No selection", "Please select at least one installation.", parent=win)
+            messagebox.showinfo(
+                "No selection", "Please select at least one installation.", parent=win)
             return False
         return True
+
     def set_mode_and_close(m):
-        if m in ("COPY","REMOVE") and not ensure_sel():
+        if m in ("COPY", "REMOVE") and not ensure_sel():
             return
         state["mode"] = m
         state["sel_idx"] = list(lb.curselection())
         win.destroy()
 
-    tk.Button(bar, text="Select All",   width=14, command=select_all).pack(side="left", padx=6)
-    tk.Button(bar, text="Clear",        width=14, command=clear_sel).pack(side="left", padx=6)
-    tk.Button(bar, text="Copy/Replace", width=16, command=lambda: set_mode_and_close("COPY")).pack(side="left", padx=6)
-    tk.Button(bar, text="Remove",       width=14, command=lambda: set_mode_and_close("REMOVE")).pack(side="left", padx=6)
-    tk.Button(bar, text="Rescan",       width=14, command=lambda: set_mode_and_close("RESCAN")).pack(side="left", padx=6)
+    tk.Button(bar, text="Select All",   width=14,
+              command=select_all).pack(side="left", padx=6)
+    tk.Button(bar, text="Clear",        width=14,
+              command=clear_sel).pack(side="left", padx=6)
+    tk.Button(bar, text="Copy/Replace", width=16,
+              command=lambda: set_mode_and_close("COPY")).pack(side="left", padx=6)
+    tk.Button(bar, text="Remove",       width=14, command=lambda: set_mode_and_close(
+        "REMOVE")).pack(side="left", padx=6)
+    tk.Button(bar, text="Rescan",       width=14, command=lambda: set_mode_and_close(
+        "RESCAN")).pack(side="left", padx=6)
 
     # footer credits
-    foot = tk.Frame(win); foot.pack(pady=(0,8), fill="x")
+    foot = tk.Frame(win)
+    foot.pack(pady=(0, 8), fill="x")
     tk.Label(foot, text=APP_TITLE, anchor="w").pack(side="left", padx=12)
 
-    win.grab_set(); win.wait_window()
+    win.grab_set()
+    win.wait_window()
     mode = state["mode"]
-    sel_paths = [paths[i] for i in state["sel_idx"]] if mode in ("COPY","REMOVE") else []
+    sel_paths = [paths[i] for i in state["sel_idx"]
+                 ] if mode in ("COPY", "REMOVE") else []
     log.debug(f"[UI] Mode: {mode}; Selected: {sel_paths}")
     return (mode, sel_paths)
 
 # ==========================
 # Actions
 # ==========================
+
+
 def ensure_uac_for_paths(paths):
     needs_elev = False
     for p in paths:
@@ -497,6 +602,7 @@ def ensure_uac_for_paths(paths):
                                    parent=ROOT)
             log.debug("[UAC] User chose to continue without elevation.")
 
+
 def copy_replace(source_root: str, dest_paths: list[str]):
     copied = 0
     for root, _, files in os.walk(source_root):
@@ -510,6 +616,7 @@ def copy_replace(source_root: str, dest_paths: list[str]):
                 except Exception as e:
                     log.debug(f"[COPY] Failed {name} -> {dest}: {e}")
     return copied
+
 
 def remove_matching(source_root: str, dest_paths: list[str]):
     removed = 0
@@ -529,6 +636,8 @@ def remove_matching(source_root: str, dest_paths: list[str]):
 # ==========================
 # Main
 # ==========================
+
+
 def main():
     # 0) Guard: exit if Black Desert is running
     guard_game_not_running_or_exit()
@@ -557,7 +666,8 @@ def main():
                 if messagebox.askyesno("Not Found",
                                        "No installations found automatically.\n\nSelect the game folder manually?",
                                        parent=ROOT):
-                    manual = filedialog.askdirectory(parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
+                    manual = filedialog.askdirectory(
+                        parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
                     if not manual:
                         return
                     if not (Path(manual) / GAME_EXE).exists():
@@ -570,7 +680,8 @@ def main():
                 else:
                     return
         else:
-            manual = filedialog.askdirectory(parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
+            manual = filedialog.askdirectory(
+                parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
             if not manual:
                 return
             if not (Path(manual) / GAME_EXE).exists():
@@ -600,14 +711,16 @@ def main():
         if not mode_action:
             return
         if not selected:
-            messagebox.showinfo("No Selection", "No installations selected.", parent=ROOT)
+            messagebox.showinfo(
+                "No Selection", "No installations selected.", parent=ROOT)
             return
 
         # validate & prune cache
         bad = [p for p in selected if not (Path(p) / GAME_EXE).exists()]
         if bad:
             messagebox.showerror("Invalid Selection",
-                                 "These paths do not contain BlackDesert64.exe:\n\n" + "\n".join(bad),
+                                 "These paths do not contain BlackDesert64.exe:\n\n" +
+                                 "\n".join(bad),
                                  parent=ROOT)
             installs = [p for p in installs if p not in bad]
             write_cache(installs)
@@ -617,7 +730,8 @@ def main():
         ensure_uac_for_paths(selected)
         if not messagebox.askyesno(
             "Confirm",
-            f"Source:\n{source}\n\nAction: {mode_action}\n\nDestinations:\n" + "\n".join(selected),
+            f"Source:\n{source}\n\nAction: {mode_action}\n\nDestinations:\n" +
+                "\n".join(selected),
             parent=ROOT
         ):
             return
@@ -625,11 +739,13 @@ def main():
         # Execute
         if mode_action == "COPY":
             total = copy_replace(source, selected)
-            messagebox.showinfo("Done", f"Copied/Replaced: {total}", parent=ROOT)
+            messagebox.showinfo(
+                "Done", f"Copied/Replaced: {total}", parent=ROOT)
         else:
             total = remove_matching(source, selected)
             messagebox.showinfo("Done", f"Removed: {total}", parent=ROOT)
         return
+
 
 if __name__ == "__main__":
     try:
