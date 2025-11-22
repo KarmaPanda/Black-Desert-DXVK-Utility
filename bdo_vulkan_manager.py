@@ -22,10 +22,11 @@ BUNDLED = True   # <<< SET THIS: True = bundle assets via --add-data, False = us
 # ==========================
 # Runtime context & paths
 # ==========================
-FROZEN = getattr(sys, "frozen", False)
+# Detect if running as compiled executable (Nuitka uses __compiled__, PyInstaller uses frozen)
+FROZEN = getattr(sys, "frozen", False) or "__compiled__" in globals()
 APP_DIR = (Path(sys.executable).resolve(
 ).parent if FROZEN else Path(__file__).resolve().parent)
-# where PyInstaller unpacks data
+# For Nuitka: resources are typically next to exe; for PyInstaller: in _MEIPASS
 MEIPASS_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR)).resolve()
 
 CONFIG_FILE = APP_DIR / "bdovulkan_config.ini"

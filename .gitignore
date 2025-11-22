@@ -3,6 +3,16 @@ BDO_Vulkan_API/
 
 # Ignore build artifacts and distribution files
 dist/
-build/
+bdo_vulkan_manager.*/
+build*/
 *.zip
 *.spec
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+BDOVulkanUtility.exe
+
+# Ignore virtual environment directories
+.venv*/
+venv*/

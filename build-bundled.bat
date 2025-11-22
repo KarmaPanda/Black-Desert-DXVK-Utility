@@ -1,5 +1,4 @@
 pyinstaller --onefile --windowed ^
-  --icon BlackDesert.ico ^
   --add-data "assets/Normal;assets/Normal" ^
   --add-data "assets/Potato;assets/Potato" ^
   --add-data "BlackDesert.ico;." ^
