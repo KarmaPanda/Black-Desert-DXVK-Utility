@@ -16,3 +16,4 @@ BDOVulkanUtility.exe
 # Ignore virtual environment directories
 .venv*/
 venv*/
+bdovulkan_config.ini
