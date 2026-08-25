@@ -207,7 +207,7 @@ cd /d "%ROOT_DIR%"
   --distpath "%DIST_DIR%" ^
   --workpath "%ROOT_DIR%build" ^
   --specpath "%ROOT_DIR%build" ^
-  --add-data "BlackDesert.ico;." ^
+  --add-data "%ROOT_DIR%BlackDesert.ico;." ^
   --name "BDOVulkanUtility" ^
   bdo_vulkan_manager.py
 
