@@ -78,9 +78,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path source-release | Out-Null
           Copy-Item .\bdo_vulkan_manager.py .\source-release\
           Copy-Item .\run.bat .\source-release\
-          Copy-Item .\BlackDesert.ico .\source-release\
-          Copy-Item .\bdovulkan_config.ini .\source-release\
-          Copy-Item .\bdovulkan_installs.txt .\source-release\
+          if (Test-Path .\BlackDesert.ico) { Copy-Item .\BlackDesert.ico .\source-release\ }
           if (Test-Path .\assets) { Copy-Item .\assets\* .\source-release\assets\ -Recurse -Force }
           Compress-Archive -Path .\source-release\* -DestinationPath "${env:ARTIFACT_PREFIX}-${env:ARTIFACT_VERSION}-source.zip" -Force
 
