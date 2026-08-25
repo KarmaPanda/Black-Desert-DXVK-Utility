@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
-  "download_url": "https://example.invalid/BDOVulkanUtility.exe",
-  "notes": "Set BDO_VULKAN_UPDATE_MANIFEST_URL or replace this file with a real release manifest to enable auto-updates."
+  "version": "1.0.1",
+  "download_url": "https://github.com/KarmaPanda/Black-Desert-DXVK-Utility/releases",
+  "notes": "Release 1.0.1: CI build and release workflow reliability fixes, including non-bundled icon path handling and source packaging fixes."
 }

@@ -36,6 +36,7 @@ MEIPASS_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR)).resolve()
 # Build/runtime bundle mode
 # ==========================
 
+
 def resolve_bundle_mode() -> bool:
     """Resolve the asset mode automatically, with an explicit env override.
 
@@ -72,7 +73,7 @@ SOURCE_ROOT = APP_DIR / "BDO_Vulkan_API"   # used when BUNDLED=False
 ASSETS_ROOT_REL = Path("assets")  # used when BUNDLED=True
 
 GAME_EXE = "BlackDesert64.exe"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_TITLE = f"Black Desert Online Vulkan Utility — by KarmaPanda v{APP_VERSION}"
 GITHUB_REPO_OWNER = "KarmaPanda"
 GITHUB_REPO_NAME = "Black-Desert-DXVK-Utility"
@@ -1120,7 +1121,8 @@ def check_for_updates(show_if_up_to_date: bool = True) -> bool:
     try:
         QDesktopServices.openUrl(QUrl(GITHUB_RELEASES_PAGE_URL))
     except Exception:
-        qt_info("Update Available", message + f"\n\nOpen this page: {GITHUB_RELEASES_PAGE_URL}")
+        qt_info("Update Available", message +
+                f"\n\nOpen this page: {GITHUB_RELEASES_PAGE_URL}")
     return True
 
 

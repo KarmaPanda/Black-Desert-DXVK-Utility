@@ -133,13 +133,13 @@ Inspired by the need for an easy Vulkan installation for Black Desert Online and
 
 ## 📸 Screenshots
 
-Source/Mode Selection
-
-![Source/Mode Selection](/screenshots/select_source.png?raw=true "Source/Mode Selection")
-
 Installation Detection
 
 ![Installation Detection](/screenshots/installation_detection.png?raw=true "Installation Detection")
+
+Source Scanning
+
+![Source Scanning](/screenshots/scan_source.png?raw=true "Source Scanning")
 
 Select Installation Menu
 

@@ -159,8 +159,8 @@ cd /d "%ROOT_DIR%"
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
   --product-name="Black Desert Vulkan Utility" ^
-  --file-version=1.0.0.0 ^
-  --product-version=1.0.0.0 ^
+  --file-version=1.0.1.0 ^
+  --product-version=1.0.1.0 ^
   --file-description="Black Desert Online Vulkan/DXVK Manager" ^
   --copyright="Copyright (c) 2025 KarmaPanda" ^
   --trademarks="Black Desert Online is a trademark of Pearl Abyss" ^
@@ -260,8 +260,8 @@ cd /d "%ROOT_DIR%"
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
   --product-name="Black Desert Vulkan Utility" ^
-  --file-version=1.0.0.0 ^
-  --product-version=1.0.0.0 ^
+  --file-version=1.0.1.0 ^
+  --product-version=1.0.1.0 ^
   --file-description="Black Desert Online Vulkan/DXVK Manager" ^
   --copyright="Copyright (c) 2025 KarmaPanda" ^
   --trademarks="Black Desert Online is a trademark of Pearl Abyss" ^
