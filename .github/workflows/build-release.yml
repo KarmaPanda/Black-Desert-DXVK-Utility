@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      ARTIFACT_VERSION: ${{ github.ref_name != '' && github.ref_name || 'manual' }}
+      ARTIFACT_PREFIX: Black-Desert-Vulkan-Utility
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install nuitka pyinstaller PyQt6
+
+      - name: Build bundled PyInstaller release
+        shell: cmd
+        run: |
+          call scripts\build.bat bundled-pyinstaller
+          if not exist dist\BDOVulkanUtility.exe exit /b 1
+          if exist release-pyinstaller-bundled rmdir /s /q release-pyinstaller-bundled
+          mkdir release-pyinstaller-bundled
+          copy /Y dist\BDOVulkanUtility.exe "release-pyinstaller-bundled\%ARTIFACT_PREFIX%-%ARTIFACT_VERSION%-bundled-pyinstaller.exe"
+
+      - name: Build non-bundled PyInstaller release
+        shell: cmd
+        run: |
+          call scripts\build.bat nonbundled-pyinstaller
+          if not exist dist\BDOVulkanUtility.exe exit /b 1
+          if exist release-pyinstaller-nonbundled rmdir /s /q release-pyinstaller-nonbundled
+          mkdir release-pyinstaller-nonbundled
+          copy /Y dist\BDOVulkanUtility.exe "release-pyinstaller-nonbundled\%ARTIFACT_PREFIX%-%ARTIFACT_VERSION%-nonbundled-pyinstaller.exe"
+          if exist dist\assets (
+            if not exist release-pyinstaller-nonbundled\assets mkdir release-pyinstaller-nonbundled\assets
+            xcopy dist\assets release-pyinstaller-nonbundled\assets\ /E /I /Y >nul
+          )
+
+      - name: Build bundled Nuitka release
+        shell: cmd
+        run: |
+          call scripts\build.bat bundled-nuitka
+          if not exist dist\BDOVulkanUtility.exe exit /b 1
+          if exist release-nuitka-bundled rmdir /s /q release-nuitka-bundled
+          mkdir release-nuitka-bundled
+          copy /Y dist\BDOVulkanUtility.exe "release-nuitka-bundled\%ARTIFACT_PREFIX%-%ARTIFACT_VERSION%-bundled-nuitka.exe"
+
+      - name: Build non-bundled Nuitka release
+        shell: cmd
+        run: |
+          call scripts\build.bat nonbundled-nuitka
+          if not exist dist\BDOVulkanUtility.exe exit /b 1
+          if exist release-nuitka-nonbundled rmdir /s /q release-nuitka-nonbundled
+          mkdir release-nuitka-nonbundled
+          copy /Y dist\BDOVulkanUtility.exe "release-nuitka-nonbundled\%ARTIFACT_PREFIX%-%ARTIFACT_VERSION%-nonbundled-nuitka.exe"
+          if exist dist\assets (
+            if not exist release-nuitka-nonbundled\assets mkdir release-nuitka-nonbundled\assets
+            xcopy dist\assets release-nuitka-nonbundled\assets\ /E /I /Y >nul
+          )
+
+      - name: Prepare source release
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path source-release | Out-Null
+          Copy-Item .\bdo_vulkan_manager.py .\source-release\
+          Copy-Item .\run.bat .\source-release\
+          Copy-Item .\BlackDesert.ico .\source-release\
+          Copy-Item .\bdovulkan_config.ini .\source-release\
+          Copy-Item .\bdovulkan_installs.txt .\source-release\
+          if (Test-Path .\assets) { Copy-Item .\assets\* .\source-release\assets\ -Recurse -Force }
+          Compress-Archive -Path .\source-release\* -DestinationPath "${env:ARTIFACT_PREFIX}-${env:ARTIFACT_VERSION}-source.zip" -Force
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release-pyinstaller-bundled/*.exe
+            release-pyinstaller-nonbundled/*.exe
+            release-pyinstaller-nonbundled/assets/**
+            release-nuitka-bundled/*.exe
+            release-nuitka-nonbundled/*.exe
+            release-nuitka-nonbundled/assets/**
+            "${{ env.ARTIFACT_PREFIX }}-${{ env.ARTIFACT_VERSION }}-source.zip"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdovulkan-builds
+          path: |
+            release-pyinstaller-bundled/*.exe
+            release-pyinstaller-nonbundled/*.exe
+            release-pyinstaller-nonbundled/assets/**
+            release-nuitka-bundled/*.exe
+            release-nuitka-nonbundled/*.exe
+            release-nuitka-nonbundled/assets/**
+            "${{ env.ARTIFACT_PREFIX }}-${{ env.ARTIFACT_VERSION }}-source.zip"

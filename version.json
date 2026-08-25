@@ -1,0 +1,5 @@
+{
+  "version": "1.0.0",
+  "download_url": "https://example.invalid/BDOVulkanUtility.exe",
+  "notes": "Set BDO_VULKAN_UPDATE_MANIFEST_URL or replace this file with a real release manifest to enable auto-updates."
+}

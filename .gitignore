@@ -4,6 +4,7 @@ BDO_Vulkan_API/
 # Ignore build artifacts and distribution files
 dist/
 bdo_vulkan_manager.*/
+.bdo_vulkan_tmp*/
 build*/
 *.zip
 *.spec
@@ -17,3 +18,4 @@ BDOVulkanUtility.exe
 .venv*/
 venv*/
 bdovulkan_config.ini
+bdovulkan_installs.txt

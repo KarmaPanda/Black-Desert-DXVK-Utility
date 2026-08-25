@@ -1,13 +1,13 @@
 # Black Desert Online Vulkan Utility — by KarmaPanda
 
 A Windows desktop utility to easily copy and replace DXVK files into the **Black Desert Online (BDO)** folder.  
-This tool provides a simple GUI for copying or removing files such as **Normal** or **Potato Graphics** mode Vulkan files into your Black Desert installation.
+This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copying the consolidated Vulkan asset files into your Black Desert installation.
 
 ---
 
 ## ✨ Features
 
-- **Mode selection**: Choose between **Normal** and **Potato** presets.
+- **LOD bias control**: Use a slider/input to set `d3d11.samplerLodBias` from negative to positive values.
 - **Automatic detection**: Scans all available drives for Black Desert installations.
 - **Multiple installs**: Supports managing files across multiple game folders.
 - **Copy / Remove**: Copy or replace Vulkan files, or remove them, all from one program.
@@ -22,7 +22,7 @@ This tool provides a simple GUI for copying or removing files such as **Normal**
 
 1. Download the latest release or build it yourself (see **Build** section).
 2. Place the utility in a folder of your choice.
-3. (Optional) Place your Vulkan files under `BDO_Vulkan_API/Normal` or `BDO_Vulkan_API/Potato` if using non-bundled mode.
+3. (Optional) Place your consolidated Vulkan files under `assets` for bundled mode or under a custom source folder for non-bundled mode.
 
 ---
 
@@ -30,8 +30,7 @@ This tool provides a simple GUI for copying or removing files such as **Normal**
 
 1. **Close Black Desert Online** (the tool will refuse to run if the game is open).
 2. Run the utility.
-3. Choose the source mode:
-   - **Normal** or **Potato**
+3. Adjust the **sampler LOD bias** with the slider or number box.
 4. Select one or more detected BDO installation folders:
    - Use **Copy/Replace** to apply the Vulkan files.
    - Use **Remove** to delete them.
@@ -44,18 +43,23 @@ This tool provides a simple GUI for copying or removing files such as **Normal**
 The application can run in two modes:
 
 ### 🔹 Non-Bundled Mode
-- The Vulkan files are expected in a folder structure:
+
+- The Vulkan files are expected in a single source folder such as:
+
 ```
-./BDO_Vulkan_API/Normal
-./BDO_Vulkan_API/Potato
+./assets
 ```
-- You manage the contents of these folders manually.
+
+or another custom folder you select manually.
+
+- You manage the contents of that folder manually.
 - Files remain on disk between runs.
 
 ### 🔹 Bundled Mode
-- Vulkan files are **embedded directly into the application** during build.
+
+- Vulkan files are **embedded directly into the application** during build from the single `assets` directory.
 - At runtime, the files are **extracted to a temporary folder** (e.g.  
-`C:\Users\<User>\AppData\Local\Temp\bdo_vulkan_normal_xxxxxx\`).
+  `C:\Users\<User>\AppData\Local\Temp\bdo_vulkan_assets_xxxxxx\`).
 - The temporary folder is **automatically deleted** when the application exits.
 - This keeps the application directory clean with no leftover assets.
 
@@ -68,29 +72,32 @@ The application can run in two modes:
 This project uses **Python 3.11+** and **Tkinter** (comes with Python).
 
 Dependencies:
+
 - None beyond the Python standard library.
 
 ### Use the included .bat files to compile (if you're on Windows)
+
 ```
 build-bundled.bat
-build-non-bundled.bat 
+build-non-bundled.bat
 ```
 
 or DIY
 
 ### Non-bundled build (expects local `BDO_Vulkan_API` folders):
+
 ```bash
 pyinstaller --onefile --windowed --icon BlackDesert.ico \
   --add-data "BlackDesert.ico;." \
   bdo_vulkan_manager.py
 ```
 
-### Bundled build (includes Normal/Potato assets inside the exe):
+### Bundled build (includes the consolidated assets folder inside the exe):
+
 ```bash
 pyinstaller --onefile --windowed --icon BlackDesert.ico \
   --add-data "BlackDesert.ico;." \
-  --add-data "assets/Normal;assets/Normal" \
-  --add-data "assets/Potato;assets/Potato" \
+  --add-data "assets;assets" \
   bdo_vulkan_manager.py
 ```
 

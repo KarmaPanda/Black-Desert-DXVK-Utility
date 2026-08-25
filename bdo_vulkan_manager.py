@@ -1,5 +1,6 @@
 # bdo_vulkan_manager.py
 import ctypes
+import json
 import os
 import sys
 import shutil
@@ -8,16 +9,18 @@ import logging
 import subprocess
 from pathlib import Path
 import configparser
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from urllib import request, error
+from PyQt6.QtWidgets import (
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget,
+    QMessageBox, QPushButton, QProgressDialog, QSlider, QVBoxLayout,
+    QDoubleSpinBox
+)
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 import base64
 import tempfile
 import atexit
-
-# ==========================
-# BUILD-TIME SWITCH
-# ==========================
-BUNDLED = True   # <<< SET THIS: True = bundle assets via --add-data, False = use local ./BDO_Vulkan_API
+import re
 
 # ==========================
 # Runtime context & paths
@@ -29,16 +32,60 @@ APP_DIR = (Path(sys.executable).resolve(
 # For Nuitka: resources are typically next to exe; for PyInstaller: in _MEIPASS
 MEIPASS_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR)).resolve()
 
+# ==========================
+# Build/runtime bundle mode
+# ==========================
+
+def resolve_bundle_mode() -> bool:
+    """Resolve the asset mode automatically, with an explicit env override.
+
+    Supported overrides: BDO_VULKAN_BUNDLED=1/true/yes or 0/false/no.
+    If no override is supplied, use the project layout that is actually present at runtime.
+    """
+    override = os.environ.get("BDO_VULKAN_BUNDLED")
+    if override is not None:
+        return override.strip().lower() not in {"0", "false", "no", "off"}
+
+    # Prefer the asset layout that exists in the current runtime directory.
+    runtime_dir = APP_DIR
+    bundled_dir = runtime_dir / "assets"
+    nonbundled_dir = runtime_dir / "BDO_Vulkan_API"
+
+    if bundled_dir.exists() and any(bundled_dir.iterdir()):
+        return True
+    if nonbundled_dir.exists() and any(nonbundled_dir.iterdir()):
+        return False
+
+    # Fallback for compiled single-file builds that extract assets into the executable folder.
+    return True
+
+
+# Determine the active bundle mode at runtime so the app does not require a code edit
+# for bundled vs non-bundled variants.
+BUNDLED = resolve_bundle_mode()
+
 CONFIG_FILE = APP_DIR / "bdovulkan_config.ini"
 CACHE_FILE = APP_DIR / "bdovulkan_installs.txt"
 ICON_FILE = "BlackDesert.ico"  # searched in APP_DIR and MEIPASS_DIR
 
 SOURCE_ROOT = APP_DIR / "BDO_Vulkan_API"   # used when BUNDLED=False
-ASSETS_NORMAL_REL = Path("assets/Normal")  # used when BUNDLED=True
-ASSETS_POTATO_REL = Path("assets/Potato")  # used when BUNDLED=True
+ASSETS_ROOT_REL = Path("assets")  # used when BUNDLED=True
 
 GAME_EXE = "BlackDesert64.exe"
-APP_TITLE = "Black Desert Online Vulkan Utility — by KarmaPanda"
+APP_VERSION = "1.0.0"
+APP_TITLE = f"Black Desert Online Vulkan Utility — by KarmaPanda v{APP_VERSION}"
+GITHUB_REPO_OWNER = "KarmaPanda"
+GITHUB_REPO_NAME = "Black-Desert-DXVK-Utility"
+GITHUB_RELEASES_PAGE_URL = (
+    f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases"
+)
+DEFAULT_GITHUB_RELEASES_URL = (
+    f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+)
+UPDATER_MANIFEST_URL = os.environ.get(
+    "BDO_VULKAN_UPDATE_MANIFEST_URL",
+    DEFAULT_GITHUB_RELEASES_URL,
+)
 
 COMMON_RELATIVE_PATHS = [
     r"\BlackDesert",
@@ -102,80 +149,141 @@ logging.basicConfig(
 )
 log = logging.getLogger("BDO-Vulkan")
 
-# ==========================
-# Icon utilities (robust for bundled & non-bundled)
-# ==========================
-# Small fallback icon (64x64 PNG) encoded as base64 so wm_iconphoto always has something.
-ICON_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAsSAAALEgHS3X78"
-    "AAABX0lEQVR4nO3YwUrDQBQF4N8m1gK2hCw0Qw0b2GqQ0Q2mEJg0y7p9J7JgGq3l1r6O3q4g3n"
-    "cQy9w8w2mL5u5b9cO5c0m+1gYhIhIhIhIhIhIhIhIhIhK/4n3iS1wO2G1f9zWJ3gR0x4pD9K1b"
-    "6w4mWQm2w6v5lfr1w6p2n1G9fQ6vls2qv7qj3w0x0b9l6D4a4X8S4Yxkq+g7G5J2n8Wc7oP1nA"
-    "8WwQ1kqH8zjE3qv7p7C7c1h3sJ5Xy1xH0yQzq6g8Jb8b8yq0lQ3kq9Q4oZ9J6w2W4cGFiYmJgY"
-    "GBgYGBgYGBgYGBgYGBgYGBgYGBg4H+QyQm8B0yQy9F3bCq3mH4r2gZy4m2w9m0c8m0Y8m0Y8m0"
-    "c8m0Zf4+o0Ff4a3xg9jDF3Q7z0nC6bq5m7mJmZl/8BRl4L3e0k7nQAAAABJRU5ErkJggg=="
-)
 
-_APP_ICON_PHOTO = None  # keep a global reference so it doesn't get GC'd
+def _resource_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[Path] = set()
+
+    candidates = [
+        Path(getattr(sys, "_MEIPASS", "")).resolve(
+        ) if getattr(sys, "_MEIPASS", "") else None,
+        Path(sys.executable).resolve().parent if getattr(
+            sys, "executable", None) else None,
+        APP_DIR,
+        MEIPASS_DIR,
+        Path.cwd().resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+        Path.home().resolve(),
+    ]
+
+    if getattr(sys, "executable", None):
+        exe_path = Path(sys.executable).resolve()
+        for parent in [exe_path.parent, *exe_path.parent.parents[:4]]:
+            candidates.append(parent)
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            candidate = candidate.resolve()
+        except Exception:
+            pass
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        roots.append(candidate)
+
+    return roots
 
 
 def _find_ico_path() -> Path | None:
-    # 1) Next to exe/script
-    p = APP_DIR / ICON_FILE
-    if p.exists():
-        return p
-    # 2) In MEIPASS (when you do --add-data "BlackDesert.ico;.")
-    p = MEIPASS_DIR / ICON_FILE
-    if p.exists():
-        return p
+    for base in _resource_roots():
+        candidate = (base / ICON_FILE).resolve()
+        if candidate.exists() and candidate.is_file():
+            return candidate
+        # Fall back to immediate children only; avoid scanning unrelated Windows temp/download folders.
+        for child in base.iterdir():
+            if child.name == ICON_FILE and child.is_file():
+                return child.resolve()
     return None
 
 
-def _load_photo_from_b64_png():
-    global _APP_ICON_PHOTO
-    try:
-        _APP_ICON_PHOTO = tk.PhotoImage(data=ICON_PNG_B64)
-        return _APP_ICON_PHOTO
-    except Exception:
-        return None
+# ==========================
+# Qt-only app helpers
+# ==========================
+
+def ensure_qt_app() -> QApplication:
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
 
 
-def setup_app_icon(win: tk.Misc):
-    """Set both iconbitmap (.ico) and wm_iconphoto (PNG) safely."""
-    ico = _find_ico_path()
+def qt_info(title: str, message: str):
+    ensure_qt_app()
+    QMessageBox.information(None, title, message)
+
+
+def qt_error(title: str, message: str):
+    ensure_qt_app()
+    QMessageBox.critical(None, title, message)
+
+
+def qt_warning(title: str, message: str):
+    ensure_qt_app()
+    QMessageBox.warning(None, title, message)
+
+
+def qt_yes_no(title: str, message: str) -> bool:
+    ensure_qt_app()
+    result = QMessageBox.question(None, title, message)
+    return result == QMessageBox.StandardButton.Yes
+
+
+def qt_directory_prompt(title: str) -> str:
+    ensure_qt_app()
+    path = QFileDialog.getExistingDirectory(
+        None, title, options=QFileDialog.Option.ShowDirsOnly)
+    return path or ""
+
+
+def set_window_icon(widget, icon_path: Path | None = None):
+    ico = icon_path or _find_ico_path()
     if ico is not None:
         try:
-            win.iconbitmap(default=str(ico.resolve()))
-        except Exception:
-            pass
-    photo = _load_photo_from_b64_png()
-    if photo is not None:
-        try:
-            win.wm_iconphoto(True, photo)
+            from PyQt6.QtGui import QIcon
+            widget.setWindowIcon(QIcon(str(ico.resolve())))
         except Exception:
             pass
 
 
-def new_window(title: str, geometry: tuple[int, int] | None = None) -> tk.Toplevel:
-    w = tk.Toplevel(ROOT)
-    setup_app_icon(w)
-    w.title(title)
-    if geometry:
-        width, height = geometry
-        w.update_idletasks()
-        x = w.winfo_screenwidth() // 2 - width // 2
-        y = w.winfo_screenheight() // 2 - height // 2
-        w.geometry(f"{width}x{height}+{x}+{y}")
-    return w
+def get_windows_scale_factor() -> float:
+    if os.name != "nt":
+        return 1.0
+    try:
+        return max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96.0)
+    except Exception:
+        return 1.0
 
 
-# ==========================
-# Single hidden root
-# ==========================
-ROOT = tk.Tk()
-ROOT.withdraw()
-ROOT.title(APP_TITLE)
-setup_app_icon(ROOT)
+def ui_font(size: int = 9, family: str = "Segoe UI") -> tuple[str, int]:
+    scale = get_windows_scale_factor()
+    scaled_size = max(8, min(16, int(round(size * scale))))
+    return (family, scaled_size)
+
+
+def enable_dpi_awareness():
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(0x00001000)
+        return
+    except Exception:
+        pass
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+enable_dpi_awareness()
 
 # ==========================
 # UAC helpers
@@ -219,13 +327,26 @@ def is_process_running(image_name: str) -> bool:
 
 def guard_game_not_running_or_exit():
     if is_process_running(GAME_EXE):
-        # Make a small topmost dialog to ensure it's seen
-        messagebox.showerror(
+        qt_error(
             "Game is Running",
-            f"{GAME_EXE} appears to be running.\n\nPlease close Black Desert Online before using this utility.",
-            parent=ROOT
+            f"{GAME_EXE} appears to be running.\n\nPlease close Black Desert Online before importing or removing DXVK files.",
         )
         sys.exit(0)
+
+
+def ensure_game_closed_for_mutation(action_label: str):
+    if is_process_running(GAME_EXE):
+        if not qt_yes_no(
+            "Game is Running",
+            f"{GAME_EXE} is currently running.\n\nPlease close Black Desert Online before {action_label}.\n\nWould you like to retry after closing it?",
+        ):
+            return False
+        qt_error(
+            "Game is Running",
+            f"{GAME_EXE} is still running.\n\n{action_label} was cancelled.",
+        )
+        return False
+    return True
 
 # ==========================
 # Progress dialog
@@ -235,30 +356,25 @@ def guard_game_not_running_or_exit():
 class ProgressDialog:
     def __init__(self, title="Scanning...", initial="Starting..."):
         self.cancelled = False
-        self.win = new_window(title, geometry=(520, 140))
-        self.win.resizable(False, False)
-        self.label = tk.Label(self.win, text=initial,
-                              width=62, anchor="w", justify="left")
-        self.label.pack(padx=14, pady=(12, 6))
-        self.pb = ttk.Progressbar(self.win, mode="indeterminate", length=440)
-        self.pb.pack(padx=14, pady=(0, 8))
-        self.pb.start(40)
-        tk.Button(self.win, text="Cancel", width=12,
-                  command=self._on_cancel).pack(pady=(0, 10))
-        self.win.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.dialog = QProgressDialog(initial, "Cancel", 0, 0)
+        self.dialog.setWindowTitle(title)
+        self.dialog.setAutoClose(False)
+        self.dialog.setAutoReset(False)
+        self.dialog.setMinimumDuration(0)
+        self.dialog.canceled.connect(self._on_cancel)
+        self.dialog.setValue(0)
+        self.dialog.show()
 
-    def _on_cancel(self): self.cancelled = True
+    def _on_cancel(self):
+        self.cancelled = True
 
-    def update_status(self, text: str): self.label.config(
-        text=text); self.win.update()
+    def update_status(self, text: str):
+        self.dialog.setLabelText(text)
+        QApplication.processEvents()
 
     def close(self):
         try:
-            self.pb.stop()
-        except Exception:
-            pass
-        try:
-            self.win.destroy()
+            self.dialog.close()
         except Exception:
             pass
 
@@ -271,76 +387,232 @@ def _bundle_path(rel: Path) -> Path:
     return (MEIPASS_DIR / rel).resolve()
 
 
-def copy_tree(src: Path, dst: Path):
-    for root, dirs, files in os.walk(src):
-        rel = Path(root).relative_to(src)
-        (dst / rel).mkdir(parents=True, exist_ok=True)
-        for f in files:
-            s = Path(root) / f
-            d = dst / rel / f
-            try:
-                shutil.copy2(s, d)
-            except Exception as e:
-                log.debug(f"[ASSETS] Copy failed {s} -> {d}: {e}")
+def _looks_like_asset_dir(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    if not any(path.iterdir()):
+        return False
+    names = {p.name.lower() for p in path.iterdir() if p.is_file()}
+    return bool(names & {"dxvk.conf", "d3d11.dll", "dxgi.dll"}) or bool(names)
+
+
+def _find_asset_directory_in_root(root: Path) -> Path | None:
+    if not root.exists():
+        return None
+
+    for relative_name in [ASSETS_ROOT_REL, Path("BDO_Vulkan_API")]:
+        candidate = (root / relative_name).resolve()
+        if _looks_like_asset_dir(candidate):
+            return candidate
+
+    assets_dir = (root / "assets").resolve()
+    if _looks_like_asset_dir(assets_dir):
+        return assets_dir
+
+    # Onefile bundle extraction may put the payload in a temp folder that is not directly
+    # named "assets"; scan for the key DXVK files anywhere under the runtime root.
+    for marker in ["dxvk.conf", "d3d11.dll", "dxgi.dll"]:
+        matches = list(root.rglob(marker))
+        if matches:
+            return matches[0].parent
+
+    if any((root / name).exists() for name in ["dxvk.conf", "d3d11.dll", "dxgi.dll"]):
+        return root
+
+    return None
+
+
+def resolve_assets_root() -> Path | None:
+    """Return the active assets directory for bundled or source execution.
+
+    For onefile builds, the extracted resource directory is usually either the exe folder
+    or the active _MEIPASS temp extraction root. Search only those runtime roots to avoid
+    accidentally matching unrelated Windows directories named "assets".
+    """
+    roots = _resource_roots()
+
+    for root in roots:
+        found = _find_asset_directory_in_root(root)
+        if found is not None:
+            return found
+
+    return None
+
+
+TEMP_ASSET_ROOT = APP_DIR / ".bdo_vulkan_tmp"
+TEMP_ASSET_FOLDERS: list[Path] = []
+
+
+def cleanup_temp_asset_folders():
+    for temp_dir in list(TEMP_ASSET_FOLDERS):
+        try:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                log.debug(f"[ASSETS] Cleaned up temp dir {temp_dir}")
+        except Exception as e:
+            log.debug(f"[ASSETS] Failed to clean temp dir {temp_dir}: {e}")
+        finally:
+            if temp_dir in TEMP_ASSET_FOLDERS:
+                TEMP_ASSET_FOLDERS.remove(temp_dir)
+
+
+atexit.register(cleanup_temp_asset_folders)
+
+
+def _register_temp_asset_dir(temp_dir: Path):
+    temp_dir = temp_dir.resolve()
+    if temp_dir not in TEMP_ASSET_FOLDERS:
+        TEMP_ASSET_FOLDERS.append(temp_dir)
+    return temp_dir
+
+
+def copy_dxvk_conf(src: Path, dst_dir: Path):
+    dst_dir = _register_temp_asset_dir(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst_conf = dst_dir / "dxvk.conf"
+    if src.exists():
+        shutil.copy2(src, dst_conf)
+    else:
+        dst_conf.write_text(
+            "# Generated by Black Desert Vulkan Utility\n"
+            "# Preserve the full DXVK config and only override samplerLodBias when needed.\n"
+            "d3d11.samplerLodBias = 0.0\n"
+            "d3d9.samplerLodBias = 0.0\n",
+            encoding="utf-8",
+        )
+    return dst_conf
+
+
+def copy_all_asset_files(src_root: Path, dst_dir: Path) -> list[Path]:
+    """Copy the full DXVK asset payload into a temp working directory."""
+    dst_dir = _register_temp_asset_dir(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
+
+    if not src_root.exists():
+        return copied
+
+    for src in src_root.iterdir():
+        dst = dst_dir / src.name
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+        copied.append(dst)
+
+    return copied
+
+
+def patch_sampler_lod_bias(file_path: Path, bias: float):
+    """Update only the samplerLodBias entry while preserving the rest of the DXVK config."""
+    if not file_path.exists():
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(
+            "# Generated by Black Desert Vulkan Utility\n"
+            "# Preserve the full DXVK config and only override samplerLodBias when needed.\n"
+            f"d3d11.samplerLodBias = {bias}\n"
+            "d3d9.samplerLodBias = 0.0\n",
+            encoding="utf-8",
+        )
+        return
+
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    updated = False
+
+    for idx, line in enumerate(lines):
+        if re.match(r"^\s*#?\s*(?:d3d11|d3d9)\.samplerLodBias\s*=", line):
+            value_part = re.search(r"=(\s*[-+]?(?:\d+\.\d+|\d+))", line)
+            if value_part:
+                line = line[:value_part.start(
+                    1)] + str(float(bias)) + line[value_part.end(1):]
+            else:
+                line = line.rstrip() + f" = {float(bias)}"
+            lines[idx] = line
+            updated = True
+
+    if not updated:
+        lines.append(f"d3d11.samplerLodBias = {bias}")
+
+    file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def ensure_dxvk_conf(source_path: Path) -> Path:
+    """Return the target dxvk.conf path, creating a default file when absent."""
+    candidate = source_path / "dxvk.conf"
+    if candidate.exists():
+        return candidate
+
+    matches = list(source_path.rglob("dxvk.conf"))
+    if matches:
+        return matches[0]
+
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(
+        "# Generated by Black Desert Vulkan Utility\n"
+        "d3d11.samplerLodBias = 0.0\n"
+        "d3d9.samplerLodBias = 0.0\n",
+        encoding="utf-8",
+    )
+    return candidate
 
 
 def ensure_source_for_mode(mode: str) -> str | None:
-    """
-    Returns source folder path for selected mode.
-    - BUNDLED=True: copy from bundled assets (assets/<Mode>) into a temp dir.
-    - BUNDLED=False: use ./BDO_Vulkan_API/<Mode>; if empty/missing, prompt user to pick.
-    """
+    """Resolve the active asset directory for bundled or source execution."""
     if BUNDLED:
-        rel = ASSETS_NORMAL_REL if mode.lower() == "normal" else ASSETS_POTATO_REL
-        bundled_src = _bundle_path(rel)
-
-        if not bundled_src.exists():
-            messagebox.showinfo(
+        bundled_src = resolve_assets_root()
+        if bundled_src is None or not bundled_src.exists():
+            qt_info(
                 "Source Missing",
-                f"No embedded files found for '{mode}'.\n\nSelect the source folder manually.",
-                parent=ROOT
+                "No embedded or sidecar files found under 'assets'.\n\nSelect the source folder manually.",
             )
-            chosen = filedialog.askdirectory(
-                parent=ROOT,
-                title="Select the SOURCE folder (files to manage)",
-                mustexist=True
-            )
+            chosen = qt_directory_prompt(
+                "Select the SOURCE folder (files to manage)")
             return chosen or None
 
-        # Extract to a temporary folder
-        tempdir = Path(tempfile.mkdtemp(prefix=f"bdo_vulkan_{mode.lower()}_"))
-        log.debug(f"[ASSETS] Extracting bundled {mode} -> {tempdir}")
-        copy_tree(bundled_src, tempdir)
-
-        # Ensure cleanup on exit
-        def cleanup_temp():
-            try:
-                shutil.rmtree(tempdir, ignore_errors=True)
-                log.debug(f"[ASSETS] Cleaned up temp dir {tempdir}")
-            except Exception as e:
-                log.debug(f"[ASSETS] Failed to clean temp dir {tempdir}: {e}")
-
-        atexit.register(cleanup_temp)
+        TEMP_ASSET_ROOT.mkdir(parents=True, exist_ok=True)
+        tempdir = _register_temp_asset_dir(
+            TEMP_ASSET_ROOT / f"bdo_vulkan_assets_{os.getpid()}_{len(TEMP_ASSET_FOLDERS)}")
+        tempdir.mkdir(parents=True, exist_ok=True)
+        copied = copy_all_asset_files(bundled_src, tempdir)
+        if not copied:
+            src_conf = ensure_dxvk_conf(bundled_src)
+            copy_dxvk_conf(src_conf, tempdir)
+        log.debug(
+            f"[ASSETS] Copied temp DXVK payload -> {tempdir} ({len(copied)} files)")
         return str(tempdir)
 
-    else:
-        # Non-bundled mode: look for ./BDO_Vulkan_API/<Mode>
-        target_dir = SOURCE_ROOT / mode
-        has_files = target_dir.exists() and any(target_dir.rglob("*"))
-        if has_files:
-            return str(target_dir)
-
-        messagebox.showinfo(
+    target_dir = resolve_assets_root() or SOURCE_ROOT
+    if not target_dir.exists() or not any(target_dir.rglob("*")):
+        qt_info(
             "Source Missing",
             f"Default source not found or empty:\n{target_dir}\n\nPlease select the source folder manually.",
-            parent=ROOT
         )
-        chosen = filedialog.askdirectory(
-            parent=ROOT,
-            title="Select the SOURCE folder (files to manage)",
-            mustexist=True
-        )
+        chosen = qt_directory_prompt(
+            "Select the SOURCE folder (files to manage)")
         return chosen or None
+
+    tempdir = _register_temp_asset_dir(
+        APP_DIR / ".bdo_vulkan_tmp" / f"source_{os.getpid()}_{len(TEMP_ASSET_FOLDERS)}")
+    tempdir.mkdir(parents=True, exist_ok=True)
+    copied = copy_all_asset_files(target_dir, tempdir)
+    if not copied:
+        src_conf = ensure_dxvk_conf(target_dir)
+        copy_dxvk_conf(src_conf, tempdir)
+    log.debug(
+        f"[ASSETS] Copied temp DXVK payload from source -> {tempdir} ({len(copied)} files)")
+    return str(tempdir)
+
+
+def ensure_source_for_lod_bias(lod_bias: float) -> str | None:
+    """Build a source directory from the consolidated assets root and patch the sampler LOD bias."""
+    source = ensure_source_for_mode("Assets")
+    if source is None:
+        return None
+
+    source_path = Path(source)
+    dxvk_conf = ensure_dxvk_conf(source_path)
+    patch_sampler_lod_bias(dxvk_conf, lod_bias)
+    return str(source_path)
 
 
 # ==========================
@@ -468,108 +740,175 @@ def write_cache(paths):
 # ==========================
 
 
-def choose_source_mode():
-    win = new_window("Select Source Mode", geometry=(420, 150))
-    # Extra insurance: re-apply the icon here (addresses rare cases on some systems)
-    setup_app_icon(win)
-    win.resizable(False, False)
+def create_lod_bias_controls(parent_widget):
+    layout = QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
 
-    state = {"mode": None, "cancelled": False}
+    title = QLabel("DXVK sampler LOD bias:")
+    title.setStyleSheet("font-size: 11pt; font-family: 'Segoe UI';")
+    layout.addWidget(title)
 
-    def on_cancel():
-        state["cancelled"] = True
-        win.destroy()
+    desc = QLabel(
+        "Positive = less details / higher value removes more foliage, trees, etc from game\nNegative = more details / sharper textures and increases level of detail in game")
+    desc.setWordWrap(True)
+    layout.addWidget(desc)
 
-    win.protocol("WM_DELETE_WINDOW", on_cancel)
-    win.bind("<Escape>", lambda e: on_cancel())
+    slider = QSlider(Qt.Orientation.Horizontal)
+    slider.setRange(-300, 1600)
+    slider.setValue(0)
 
-    tk.Label(win, text="Choose which source to use:").pack(
-        padx=14, pady=(12, 6))
+    spinbox = QDoubleSpinBox()
+    spinbox.setRange(-3.0, 16.0)
+    spinbox.setSingleStep(0.1)
+    spinbox.setDecimals(1)
+    spinbox.setValue(0.0)
 
-    btns = tk.Frame(win)
-    btns.pack(pady=(6, 2))
-    def set_mode(m): state["mode"] = m; win.destroy()
-    tk.Button(btns, text="Normal", width=14, command=lambda: set_mode(
-        "Normal")).pack(side="left", padx=8)
-    tk.Button(btns, text="Potato", width=14, command=lambda: set_mode(
-        "Potato")).pack(side="left", padx=8)
+    def sync_slider_from_spin():
+        value = float(spinbox.value())
+        slider.setValue(int(round(value * 100.0)))
 
-    # footer credits
-    foot = tk.Frame(win)
-    foot.pack(pady=(2, 8), fill="x")
-    tk.Label(foot, text=APP_TITLE, anchor="w").pack(side="left", padx=12)
+    def sync_spin_from_slider(value: int):
+        spinbox.setValue(value / 100.0)
 
-    win.grab_set()
-    win.wait_window()
+    slider.valueChanged.connect(sync_spin_from_slider)
+    spinbox.valueChanged.connect(sync_slider_from_spin)
 
-    if state["cancelled"]:
+    layout.addWidget(slider)
+    layout.addWidget(spinbox)
+    parent_widget.addLayout(layout)
+    return slider, spinbox
+
+
+def choose_source_mode_qt():
+    ensure_qt_app()
+    dialog = QDialog()
+    dialog.setWindowTitle("Adjust samplerLodBias")
+    set_window_icon(dialog)
+    dialog.resize(500, 220)
+    dialog.setModal(True)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(16, 16, 16, 16)
+    layout.setSpacing(10)
+    _, spinbox = create_lod_bias_controls(layout)
+
+    buttons = QHBoxLayout()
+    ok_btn = QPushButton("Apply")
+    cancel_btn = QPushButton("Cancel")
+    buttons.addWidget(ok_btn)
+    buttons.addWidget(cancel_btn)
+    layout.addLayout(buttons)
+
+    result = {"value": 0.0}
+
+    def on_ok():
+        result["value"] = float(spinbox.value())
+        dialog.accept()
+
+    ok_btn.clicked.connect(on_ok)
+    cancel_btn.clicked.connect(dialog.reject)
+
+    if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
-    return state["mode"] or "Normal"
+    return result["value"]
+
+
+def choose_source_mode():
+    return choose_source_mode_qt()
 
 
 def browse_folder(prompt: str):
-    path = filedialog.askdirectory(parent=ROOT, title=prompt, mustexist=True)
+    path = qt_directory_prompt(prompt)
     if path:
         log.debug(f"[UI] Folder chosen: {path}")
-    return path or ""
+    return path
 
 
 def select_installs_dialog(paths):
-    win = new_window("Select Black Desert Installation(s)",
-                     geometry=(840, 520))
-    tk.Label(win, text="Select one or more installations:").pack(
-        padx=12, pady=8, anchor="w")
+    ensure_qt_app()
+    dialog = QDialog()
+    dialog.setWindowTitle("Select Black Desert Installation(s)")
+    set_window_icon(dialog)
+    dialog.resize(840, 520)
+    dialog.setModal(True)
 
-    lb = tk.Listbox(win, selectmode=tk.MULTIPLE,
-                    exportselection=False, font=("Consolas", 10))
-    lb.pack(fill="both", expand=True, padx=12)
+    layout = QVBoxLayout(dialog)
+
+    version_label = QLabel(f"Version: {APP_VERSION}")
+    version_label.setStyleSheet(
+        "font-size: 10pt; font-family: 'Segoe UI'; color: #666666;")
+    layout.addWidget(version_label)
+
+    _, spinbox = create_lod_bias_controls(layout)
+
+    label = QLabel("Select one or more installations:")
+    label.setStyleSheet("font-size: 11pt; font-family: 'Segoe UI';")
+    layout.addWidget(label)
+
+    list_widget = QListWidget()
+    list_widget.setSelectionMode(list_widget.SelectionMode.MultiSelection)
     for p in sorted(paths):
-        lb.insert(tk.END, p)
+        list_widget.addItem(p)
+    layout.addWidget(list_widget)
 
-    state = {"mode": None, "sel_idx": []}
-    bar = tk.Frame(win)
-    bar.pack(pady=10)
+    warning_label = QLabel(
+        "WARNING: Close Black Desert Online before Copy/Replace or Remove.\n"
+        "The game must be closed before any DXVK files are changed."
+    )
+    warning_label.setWordWrap(True)
+    warning_label.setStyleSheet(
+        "color: #b45f06; font-size: 10pt; font-family: 'Segoe UI'; font-weight: bold;"
+    )
+    layout.addWidget(warning_label)
 
-    def select_all(): lb.select_set(0, tk.END)
-    def clear_sel(): lb.select_clear(0, tk.END)
+    buttons = QHBoxLayout()
+    select_all_btn = QPushButton("Select All")
+    clear_btn = QPushButton("Clear")
+    check_updates_btn = QPushButton("Check for Updates")
+    copy_btn = QPushButton("Copy/Replace")
+    remove_btn = QPushButton("Remove")
+    rescan_btn = QPushButton("Rescan")
+    buttons.addWidget(select_all_btn)
+    buttons.addWidget(clear_btn)
+    buttons.addWidget(check_updates_btn)
+    buttons.addWidget(copy_btn)
+    buttons.addWidget(remove_btn)
+    buttons.addWidget(rescan_btn)
+    layout.addLayout(buttons)
 
-    def ensure_sel():
-        if not lb.curselection():
-            messagebox.showinfo(
-                "No selection", "Please select at least one installation.", parent=win)
-            return False
-        return True
+    state = {"mode": None, "selected": [], "lod_bias": 0.0}
 
-    def set_mode_and_close(m):
-        if m in ("COPY", "REMOVE") and not ensure_sel():
+    def set_mode(mode):
+        selected = [list_widget.item(i).text() for i in range(
+            list_widget.count()) if list_widget.item(i).isSelected()]
+        if mode in ("COPY", "REMOVE") and not selected:
+            QMessageBox.information(
+                dialog, "No selection", "Please select at least one installation.")
             return
-        state["mode"] = m
-        state["sel_idx"] = list(lb.curselection())
-        win.destroy()
+        if mode in ("COPY", "REMOVE") and is_process_running(GAME_EXE):
+            QMessageBox.warning(
+                dialog,
+                "Close Black Desert First",
+                f"{GAME_EXE} is currently running.\n\nPlease close Black Desert Online before using Copy/Replace or Remove.",
+            )
+            return
+        state["mode"] = mode
+        state["selected"] = selected
+        state["lod_bias"] = float(spinbox.value())
+        dialog.accept()
 
-    tk.Button(bar, text="Select All",   width=14,
-              command=select_all).pack(side="left", padx=6)
-    tk.Button(bar, text="Clear",        width=14,
-              command=clear_sel).pack(side="left", padx=6)
-    tk.Button(bar, text="Copy/Replace", width=16,
-              command=lambda: set_mode_and_close("COPY")).pack(side="left", padx=6)
-    tk.Button(bar, text="Remove",       width=14, command=lambda: set_mode_and_close(
-        "REMOVE")).pack(side="left", padx=6)
-    tk.Button(bar, text="Rescan",       width=14, command=lambda: set_mode_and_close(
-        "RESCAN")).pack(side="left", padx=6)
+    select_all_btn.clicked.connect(lambda: list_widget.selectAll())
+    clear_btn.clicked.connect(list_widget.clearSelection)
+    check_updates_btn.clicked.connect(lambda: check_for_updates())
+    copy_btn.clicked.connect(lambda: set_mode("COPY"))
+    remove_btn.clicked.connect(lambda: set_mode("REMOVE"))
+    rescan_btn.clicked.connect(lambda: set_mode("RESCAN"))
 
-    # footer credits
-    foot = tk.Frame(win)
-    foot.pack(pady=(0, 8), fill="x")
-    tk.Label(foot, text=APP_TITLE, anchor="w").pack(side="left", padx=12)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return (None, [], 0.0)
 
-    win.grab_set()
-    win.wait_window()
-    mode = state["mode"]
-    sel_paths = [paths[i] for i in state["sel_idx"]
-                 ] if mode in ("COPY", "REMOVE") else []
-    log.debug(f"[UI] Mode: {mode}; Selected: {sel_paths}")
-    return (mode, sel_paths)
+    return (state["mode"], state["selected"], state["lod_bias"])
 
 # ==========================
 # Actions
@@ -590,18 +929,199 @@ def ensure_uac_for_paths(paths):
             break
 
     if needs_elev and not is_admin():
-        if messagebox.askyesno("Administrator Permission Required",
-                               "Some selected installations are in protected locations and require administrator\n"
-                               "permission to modify.\n\nRelaunch with UAC elevation now?",
-                               parent=ROOT):
+        if qt_yes_no(
+            "Administrator Permission Required",
+            "Some selected installations are in protected locations and require administrator\n"
+            "permission to modify.\n\nRelaunch with UAC elevation now?",
+        ):
             log.debug("[UAC] Relaunching elevated...")
             relaunch_as_admin()
             sys.exit(0)
         else:
-            messagebox.showwarning("Continuing without elevation",
-                                   "Continuing without elevation. Some actions may fail due to permissions.",
-                                   parent=ROOT)
+            qt_warning(
+                "Continuing without elevation",
+                "Continuing without elevation. Some actions may fail due to permissions.",
+            )
             log.debug("[UAC] User chose to continue without elevation.")
+
+
+def parse_version(value: str) -> tuple[int, int, int, str]:
+    text = str(value or "0.0.0").strip().lower().lstrip("vV")
+    match = re.match(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[.-]?(.*))?", text)
+    if not match:
+        return (0, 0, 0, "")
+    major = int(match.group(1) or 0)
+    minor = int(match.group(2) or 0)
+    patch = int(match.group(3) or 0)
+    suffix = match.group(4) or ""
+    return (major, minor, patch, suffix)
+
+
+def version_is_newer(candidate: str, current: str) -> bool:
+    return parse_version(candidate) > parse_version(current)
+
+
+def load_update_manifest_from_file(path: Path | str | None) -> dict | None:
+    if path is None:
+        return None
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return None
+    try:
+        with p.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if isinstance(payload, dict):
+            return payload
+    except Exception as exc:
+        log.debug(f"[UPDATE] Failed to read manifest from {p}: {exc}")
+    return None
+
+
+def normalize_github_release_manifest(payload: dict) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+
+    tag_name = str(payload.get("tag_name")
+                   or payload.get("version") or "").strip()
+    assets = payload.get("assets") or []
+    download_url = ""
+    if isinstance(assets, list):
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            name = str(asset.get("name") or "").lower()
+            url = str(asset.get("browser_download_url")
+                      or asset.get("download_url") or "").strip()
+            if url and (name.endswith(".exe") or "bdovulkanutility" in name.lower() or "blackdesert" in name.lower()):
+                download_url = url
+                break
+    if not download_url:
+        download_url = str(payload.get("download_url") or payload.get(
+            "browser_download_url") or "").strip()
+
+    if not tag_name and not download_url:
+        return None
+
+    normalized = dict(payload)
+    normalized["version"] = tag_name
+    normalized["download_url"] = download_url
+    return normalized
+
+
+def fetch_update_manifest() -> dict | None:
+    candidates = []
+    if UPDATER_MANIFEST_URL and UPDATER_MANIFEST_URL != "https://example.invalid/version.json":
+        candidates.append(UPDATER_MANIFEST_URL)
+    local_manifest = APP_DIR / "version.json"
+    if local_manifest.exists():
+        candidates.append(str(local_manifest))
+    for candidate in candidates:
+        try:
+            if candidate.startswith("http://") or candidate.startswith("https://"):
+                req = request.Request(
+                    candidate,
+                    headers={
+                        "User-Agent": f"BDO-Vulkan-Utility/{APP_VERSION}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+                with request.urlopen(req, timeout=15) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                    if isinstance(payload, dict):
+                        manifest = normalize_github_release_manifest(payload)
+                        if manifest:
+                            return manifest
+                        return payload
+            else:
+                manifest = load_update_manifest_from_file(candidate)
+                if manifest:
+                    return manifest
+        except Exception as exc:
+            log.debug(f"[UPDATE] Manifest fetch failed for {candidate}: {exc}")
+    return None
+
+
+def download_file_to_path(url: str, destination: Path) -> bool:
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        req = request.Request(
+            url,
+            headers={"User-Agent": f"BDO-Vulkan-Utility/{APP_VERSION}"},
+        )
+        with request.urlopen(req, timeout=30) as resp, destination.open("wb") as fh:
+            shutil.copyfileobj(resp, fh)
+        return destination.exists() and destination.stat().st_size > 0
+    except Exception as exc:
+        log.debug(f"[UPDATE] Download failed: {exc}")
+        return False
+
+
+def schedule_executable_swap(new_exe: Path, current_exe: Path) -> bool:
+    try:
+        temp_dir = Path(tempfile.gettempdir()) / "bdo_vulkan_update"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        batch_path = temp_dir / "bdo_vulkan_replace.bat"
+        script = (
+            "@echo off\r\n"
+            "setlocal\r\n"
+            "set \"NEW=%~1\"\r\n"
+            "set \"OLD=%~2\"\r\n"
+            "timeout /t 2 /nobreak >nul\r\n"
+            "copy /Y \"%NEW%\" \"%OLD%\" >nul\r\n"
+            "start \"\" \"%OLD%\"\r\n"
+            "del /f /q \"%~f0\"\r\n"
+        )
+        batch_path.write_text(script, encoding="utf-8")
+        subprocess.Popen(
+            ["cmd", "/c", str(batch_path), str(new_exe), str(current_exe)],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return True
+    except Exception as exc:
+        log.debug(f"[UPDATE] Failed to schedule replacement: {exc}")
+        return False
+
+
+def check_for_updates(show_if_up_to_date: bool = True) -> bool:
+    manifest = fetch_update_manifest()
+    if not manifest:
+        qt_info(
+            "Update Check",
+            "Unable to check for updates right now.\n\nThe GitHub release feed could not be reached.",
+        )
+        return False
+
+    latest_version = str(manifest.get("version")
+                         or manifest.get("tag_name") or "").strip()
+    if not latest_version:
+        qt_info(
+            "Update Check",
+            "The release manifest did not include a version number.",
+        )
+        return False
+
+    if not version_is_newer(latest_version, APP_VERSION):
+        if show_if_up_to_date:
+            qt_info(
+                "Up to Date",
+                f"You are running version {APP_VERSION}.\n\nThe latest release is {latest_version}.",
+            )
+        return False
+
+    message = (
+        f"Version {latest_version} is available.\n\n"
+        "Because the project publishes multiple variants (bundled vs. non-bundled and PyInstaller vs. Nuitka), "
+        "you must download the correct build from the GitHub Releases page."
+    )
+
+    if not qt_yes_no("Update Available", message + "\n\nOpen the releases page now?"):
+        return False
+
+    try:
+        QDesktopServices.openUrl(QUrl(GITHUB_RELEASES_PAGE_URL))
+    except Exception:
+        qt_info("Update Available", message + f"\n\nOpen this page: {GITHUB_RELEASES_PAGE_URL}")
+    return True
 
 
 def copy_replace(source_root: str, dest_paths: list[str]):
@@ -640,64 +1160,54 @@ def remove_matching(source_root: str, dest_paths: list[str]):
 
 
 def main():
-    # 0) Guard: exit if Black Desert is running
-    guard_game_not_running_or_exit()
+    # 0) Check for an app update before doing any work.
+    try:
+        check_for_updates(show_if_up_to_date=False)
+    except Exception as exc:
+        log.debug(f"[UPDATE] Automatic check failed: {exc}")
 
-    # 1) Mode selection
-    mode = choose_source_mode()
-    if mode is None:
-        return  # user canceled
+    # 1) The app may be opened while the game is running; only mutation actions require it to be closed.
 
-    # 2) Resolve source based on bundling mode
-    source = ensure_source_for_mode(mode)
-    if not source:
-        return
-    log.debug(f"[MAIN] Source = {source}")
-
-    # 3) Load cache or scan
+    # 2) Load cache or scan
     installs = load_cache()
     if not installs:
-        if messagebox.askyesno("Scan for Installations",
-                               "No cached Black Desert installations found.\n\nScan all drives now?",
-                               parent=ROOT):
+        if qt_yes_no("Scan for Installations",
+                     "No cached Black Desert installations found.\n\nScan all drives now?"):
             installs = scan_all_installs_with_progress()
             if installs:
                 write_cache(installs)
             else:
-                if messagebox.askyesno("Not Found",
-                                       "No installations found automatically.\n\nSelect the game folder manually?",
-                                       parent=ROOT):
-                    manual = filedialog.askdirectory(
-                        parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
+                if qt_yes_no("Not Found",
+                             "No installations found automatically.\n\nSelect the game folder manually?"):
+                    manual = qt_directory_prompt(
+                        "Select your Black Desert Online folder (must contain BlackDesert64.exe)")
                     if not manual:
                         return
                     if not (Path(manual) / GAME_EXE).exists():
-                        messagebox.showerror("Invalid Folder",
-                                             f"BlackDesert64.exe not found in:\n{manual}",
-                                             parent=ROOT)
+                        qt_error("Invalid Folder",
+                                 f"BlackDesert64.exe not found in:\n{manual}")
                         return
                     installs = [manual]
                     write_cache(installs)
                 else:
                     return
         else:
-            manual = filedialog.askdirectory(
-                parent=ROOT, title="Select your Black Desert Online folder (must contain BlackDesert64.exe)", mustexist=True)
+            manual = qt_directory_prompt(
+                "Select your Black Desert Online folder (must contain BlackDesert64.exe)")
             if not manual:
                 return
             if not (Path(manual) / GAME_EXE).exists():
-                messagebox.showerror("Invalid Folder",
-                                     f"BlackDesert64.exe not found in:\n{manual}",
-                                     parent=ROOT)
+                qt_error("Invalid Folder",
+                         f"BlackDesert64.exe not found in:\n{manual}")
                 return
             installs = [manual]
             write_cache(installs)
 
     # 4) Selection loop
     while True:
-        mode_action, selected = select_installs_dialog(installs)
+        mode_action, selected, lod_bias = select_installs_dialog(installs)
         if mode_action == "RESCAN":
-            if messagebox.askyesno("Rescan", "Rescan all drives now? (This may take a while)", parent=ROOT):
+            if qt_yes_no("Rescan", "Rescan all drives now? (This may take a while)"):
                 installs = scan_all_installs_with_progress()
                 if installs:
                     write_cache(installs)
@@ -712,47 +1222,56 @@ def main():
         if not mode_action:
             return
         if not selected:
-            messagebox.showinfo(
-                "No Selection", "No installations selected.", parent=ROOT)
+            qt_info("No Selection", "No installations selected.")
             return
 
         # validate & prune cache
         bad = [p for p in selected if not (Path(p) / GAME_EXE).exists()]
         if bad:
-            messagebox.showerror("Invalid Selection",
-                                 "These paths do not contain BlackDesert64.exe:\n\n" +
-                                 "\n".join(bad),
-                                 parent=ROOT)
+            qt_error("Invalid Selection",
+                     "These paths do not contain BlackDesert64.exe:\n\n" + "\n".join(bad))
             installs = [p for p in installs if p not in bad]
             write_cache(installs)
             continue
 
+        source = ensure_source_for_lod_bias(float(lod_bias))
+        if not source:
+            return
+        log.debug(f"[MAIN] Source = {source} | samplerLodBias = {lod_bias}")
+
+        if mode_action in ("COPY", "REMOVE"):
+            if not ensure_game_closed_for_mutation("importing DXVK files" if mode_action == "COPY" else "removing DXVK files"):
+                return
+
         # UAC check + confirm
         ensure_uac_for_paths(selected)
-        if not messagebox.askyesno(
+        if not qt_yes_no(
             "Confirm",
             f"Source:\n{source}\n\nAction: {mode_action}\n\nDestinations:\n" +
                 "\n".join(selected),
-            parent=ROOT
         ):
             return
 
         # Execute
         if mode_action == "COPY":
             total = copy_replace(source, selected)
-            messagebox.showinfo(
-                "Done", f"Copied/Replaced: {total}", parent=ROOT)
+            qt_info("Done", f"Copied/Replaced: {total}")
         else:
             total = remove_matching(source, selected)
-            messagebox.showinfo("Done", f"Removed: {total}", parent=ROOT)
+            qt_info("Done", f"Removed: {total}")
         return
 
 
 if __name__ == "__main__":
+    app = QApplication.instance() or QApplication([])
     try:
+        ico = _find_ico_path()
+        if ico is not None:
+            try:
+                from PyQt6.QtGui import QIcon
+                app.setWindowIcon(QIcon(str(ico)))
+            except Exception:
+                pass
         main()
     finally:
-        try:
-            ROOT.destroy()
-        except Exception:
-            pass
+        app.quit()
