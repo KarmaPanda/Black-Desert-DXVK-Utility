@@ -99,6 +99,14 @@ for %%M in (nuitka pyinstaller PyQt6) do (
 )
 exit /b 0
 
+:ensure_icon
+if not exist "%ICON_PATH%" (
+  echo Missing icon file: "%ICON_PATH%"
+  pause
+  exit /b 1
+)
+exit /b 0
+
 :build_bundled_pyinstaller
 call :ensure_build_modules
 if errorlevel 1 exit /b 1
@@ -136,6 +144,8 @@ exit /b 0
 :build_bundled_nuitka
 call :ensure_build_modules
 if errorlevel 1 exit /b 1
+call :ensure_icon
+if errorlevel 1 exit /b 1
 
 if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
 mkdir "%DIST_DIR%"
@@ -150,11 +160,11 @@ cd /d "%ROOT_DIR%"
   --noinclude-setuptools-mode=nofollow ^
   --noinclude-unittest-mode=nofollow ^
   --mingw64 ^
-  --windows-icon-from-ico=BlackDesert.ico ^
+  --windows-icon-from-ico="%ICON_PATH%" ^
   --include-data-files=assets/d3d11.dll=assets/d3d11.dll ^
   --include-data-files=assets/dxgi.dll=assets/dxgi.dll ^
   --include-data-files=assets/dxvk.conf=assets/dxvk.conf ^
-  --include-data-files=BlackDesert.ico=BlackDesert.ico ^
+  --include-data-files="%ICON_PATH%=BlackDesert.ico" ^
   --include-data-files=app.manifest=app.manifest ^
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
@@ -241,6 +251,8 @@ exit /b 0
 :build_nonbundled_nuitka
 call :ensure_build_modules
 if errorlevel 1 exit /b 1
+call :ensure_icon
+if errorlevel 1 exit /b 1
 
 if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
 mkdir "%DIST_DIR%"
@@ -253,9 +265,9 @@ cd /d "%ROOT_DIR%"
   --noinclude-setuptools-mode=nofollow ^
   --noinclude-unittest-mode=nofollow ^
   --mingw64 ^
-  --windows-icon-from-ico=BlackDesert.ico ^
+  --windows-icon-from-ico="%ICON_PATH%" ^
   --include-data-dir=assets=assets ^
-  --include-data-files=BlackDesert.ico=BlackDesert.ico ^
+  --include-data-files="%ICON_PATH%=BlackDesert.ico" ^
   --include-data-files=app.manifest=app.manifest ^
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
@@ -280,6 +292,10 @@ if errorlevel 1 (
 
 if exist "%NUITKA_BUILD_DIR%\BDOVulkanUtility.exe" (
   copy /Y "%NUITKA_BUILD_DIR%\BDOVulkanUtility.exe" "%DIST_DIR%\BDOVulkanUtility.exe" >nul
+)
+
+if exist "%ICON_PATH%" (
+  copy /Y "%ICON_PATH%" "%DIST_DIR%\BlackDesert.ico" >nul
 )
 
 if exist "%ROOT_DIR%assets" (

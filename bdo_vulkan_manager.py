@@ -1225,7 +1225,7 @@ def main():
             return
         if not selected:
             qt_info("No Selection", "No installations selected.")
-            return
+            continue
 
         # validate & prune cache
         bad = [p for p in selected if not (Path(p) / GAME_EXE).exists()]
@@ -1238,12 +1238,12 @@ def main():
 
         source = ensure_source_for_lod_bias(float(lod_bias))
         if not source:
-            return
+            continue
         log.debug(f"[MAIN] Source = {source} | samplerLodBias = {lod_bias}")
 
         if mode_action in ("COPY", "REMOVE"):
             if not ensure_game_closed_for_mutation("importing DXVK files" if mode_action == "COPY" else "removing DXVK files"):
-                return
+                continue
 
         # UAC check + confirm
         ensure_uac_for_paths(selected)
@@ -1252,7 +1252,7 @@ def main():
             f"Source:\n{source}\n\nAction: {mode_action}\n\nDestinations:\n" +
                 "\n".join(selected),
         ):
-            return
+            continue
 
         # Execute
         if mode_action == "COPY":
@@ -1261,7 +1261,7 @@ def main():
         else:
             total = remove_matching(source, selected)
             qt_info("Done", f"Removed: {total}")
-        return
+        continue
 
 
 if __name__ == "__main__":
