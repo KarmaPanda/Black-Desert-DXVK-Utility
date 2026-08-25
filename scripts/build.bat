@@ -2,10 +2,11 @@
 setlocal enabledelayedexpansion
 
 set "SCRIPT_DIR=%~dp0"
-set "ROOT_DIR=%SCRIPT_DIR%..\"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT_DIR=%%~fI\"
 set "PYTHON_EXE=%ROOT_DIR%venv-py312\Scripts\python.exe"
 set "DIST_DIR=%ROOT_DIR%dist"
 set "NUITKA_BUILD_DIR=%ROOT_DIR%nuitka-build"
+set "ICON_PATH=%ROOT_DIR%BlackDesert.ico"
 
 if /I "%1"=="" goto :menu
 if /I "%1"=="help" goto :show_usage
@@ -201,13 +202,15 @@ call :ensure_build_modules
 if errorlevel 1 exit /b 1
 
 if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
+if exist "%ROOT_DIR%build" rmdir /s /q "%ROOT_DIR%build"
 mkdir "%DIST_DIR%"
+mkdir "%ROOT_DIR%build"
 cd /d "%ROOT_DIR%"
 "%PYTHON_EXE%" -m PyInstaller --onefile --windowed ^
   --distpath "%DIST_DIR%" ^
   --workpath "%ROOT_DIR%build" ^
   --specpath "%ROOT_DIR%build" ^
-  --add-data "%ROOT_DIR%BlackDesert.ico;." ^
+  --icon "%ICON_PATH%" ^
   --name "BDOVulkanUtility" ^
   bdo_vulkan_manager.py
 
@@ -221,6 +224,10 @@ if exist "%ROOT_DIR%assets" (
   echo Copying assets folder to dist...
   if not exist "%DIST_DIR%\assets" mkdir "%DIST_DIR%\assets"
   xcopy "%ROOT_DIR%assets" "%DIST_DIR%\assets\" /E /I /Y >nul
+)
+
+if exist "%ICON_PATH%" (
+  copy /Y "%ICON_PATH%" "%DIST_DIR%\BlackDesert.ico" >nul
 )
 
 call :cleanup_build_artifacts
