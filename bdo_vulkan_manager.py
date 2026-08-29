@@ -65,15 +65,25 @@ def resolve_bundle_mode() -> bool:
 # for bundled vs non-bundled variants.
 BUNDLED = resolve_bundle_mode()
 
-CONFIG_FILE = APP_DIR / "bdovulkan_config.ini"
-CACHE_FILE = APP_DIR / "bdovulkan_installs.txt"
+
+def resolve_appdata_state_dir() -> Path:
+    """Store persisted settings in a stable per-user AppData directory so build/folder changes do not reset state."""
+    base = Path(os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local"))
+    return (base / "KarmaPanda" / "BDO_Vulkan_Utility").resolve(strict=False)
+
+
+APP_STATE_DIR = resolve_appdata_state_dir()
+CONFIG_FILE = APP_STATE_DIR / "bdovulkan_config.ini"
+CACHE_FILE = APP_STATE_DIR / "bdovulkan_installs.txt"
+LEGACY_CONFIG_FILE = APP_DIR / "bdovulkan_config.ini"
+LEGACY_CACHE_FILE = APP_DIR / "bdovulkan_installs.txt"
 ICON_FILE = "BlackDesert.ico"  # searched in APP_DIR and MEIPASS_DIR
 
 SOURCE_ROOT = APP_DIR / "BDO_Vulkan_API"   # used when BUNDLED=False
 ASSETS_ROOT_REL = Path("assets")  # used when BUNDLED=True
 
 GAME_EXE = "BlackDesert64.exe"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_TITLE = f"Black Desert Online Vulkan Utility — by KarmaPanda v{APP_VERSION}"
 GITHUB_REPO_OWNER = "KarmaPanda"
 GITHUB_REPO_NAME = "Black-Desert-DXVK-Utility"
@@ -105,9 +115,75 @@ COMMON_RELATIVE_PATHS = [
 # ==========================
 
 
+def migrate_legacy_state_file(legacy_path: Path | str, current_path: Path | str, replace_existing: bool = False):
+    legacy = Path(legacy_path).resolve(strict=False)
+    current = Path(current_path).resolve(strict=False)
+    if legacy == current:
+        return False
+    if not legacy.exists():
+        return False
+    if current.exists() and not replace_existing:
+        return False
+    try:
+        current.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, current)
+        if legacy.exists():
+            try:
+                legacy.unlink()
+            except Exception:
+                pass
+        log.debug(f"[STATE] Migrated legacy state file: {legacy} -> {current}")
+        return True
+    except Exception as exc:
+        log.debug(f"[STATE] Failed to migrate legacy state file: {legacy} -> {current}: {exc}")
+        return False
+
+
+def prompt_legacy_state_migration():
+    try:
+        legacy_files = []
+        if LEGACY_CONFIG_FILE.exists():
+            legacy_files.append((LEGACY_CONFIG_FILE, CONFIG_FILE, "configuration"))
+        if LEGACY_CACHE_FILE.exists():
+            legacy_files.append((LEGACY_CACHE_FILE, CACHE_FILE, "cache"))
+        if not legacy_files:
+            return
+
+        details = "\n".join(
+            f"- {label}: {legacy} -> {current}"
+            for legacy, current, label in legacy_files
+        )
+        prompt = (
+            "Legacy settings were found in the old local folder.\n\n"
+            f"{details}\n\n"
+            "Would you like to move them into the AppData profile and remove the old copies?"
+        )
+        if not qt_yes_no("Import Legacy Settings", prompt):
+            return
+
+        replace_existing = CONFIG_FILE.exists() or CACHE_FILE.exists()
+        if replace_existing and not qt_yes_no(
+            "Replace Existing AppData Settings",
+            "AppData settings already exist. Replace them with the legacy settings?",
+        ):
+            return
+
+        for legacy, current, _ in legacy_files:
+            migrate_legacy_state_file(legacy, current, replace_existing=replace_existing)
+    except Exception as exc:
+        log.debug(f"[STATE] Legacy migration prompt failed: {exc}")
+
+
+def ensure_state_dir():
+    APP_STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+ensure_state_dir()
+
+
 def load_config():
     cfg = configparser.ConfigParser()
-    cfg["general"] = {"debug": "false"}
+    cfg["general"] = {"debug": "false", "lod_bias": "0.0"}
     if CONFIG_FILE.exists():
         try:
             cfg.read(CONFIG_FILE, encoding="utf-8")
@@ -115,11 +191,41 @@ def load_config():
             pass
     else:
         try:
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             CONFIG_FILE.write_text(
-                "[general]\ndebug = false\n", encoding="utf-8")
+                "[general]\ndebug = false\nlod_bias = 0.0\n", encoding="utf-8")
         except Exception:
             pass
     return cfg
+
+
+def save_config(cfg: configparser.ConfigParser | None = None):
+    target = cfg or CFG
+    try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with CONFIG_FILE.open("w", encoding="utf-8") as fh:
+            target.write(fh)
+        return True
+    except Exception as exc:
+        log.debug(f"[CONFIG] Save failed: {exc}")
+        return False
+
+
+def get_saved_lod_bias(default: float = 0.0) -> float:
+    try:
+        return float(CFG.get("general", "lod_bias", fallback=str(default)))
+    except Exception:
+        return float(default)
+
+
+def set_saved_lod_bias(value: float):
+    try:
+        CFG.set("general", "lod_bias", str(float(value)))
+        save_config(CFG)
+        return True
+    except Exception as exc:
+        log.debug(f"[CONFIG] Failed to save sampler LOD bias: {exc}")
+        return False
 
 
 CFG = load_config()
@@ -712,14 +818,50 @@ def scan_all_installs_with_progress():
 # ==========================
 
 
+def normalize_install_path(path: str | os.PathLike[str]) -> str:
+    try:
+        return os.path.normcase(os.path.normpath(str(Path(path).resolve(strict=False))))
+    except Exception:
+        return os.path.normcase(os.path.normpath(str(path)))
+
+
+def resolve_cache_file() -> Path:
+    """Resolve the active cache file in the current runtime tree without changing the app's scan behavior."""
+    candidates = [
+        CACHE_FILE,
+        Path(sys.executable).resolve().parent / "bdovulkan_installs.txt" if getattr(sys, "executable", None) else None,
+        APP_DIR / "bdovulkan_installs.txt",
+    ]
+
+    for parent in [APP_DIR, *list(APP_DIR.parents)[:4]]:
+        candidates.append(parent / "bdovulkan_installs.txt")
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            candidate = candidate.resolve(strict=False)
+        except Exception:
+            pass
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists():
+            return candidate
+
+    return CACHE_FILE
+
+
 def load_cache():
     paths = []
-    if CACHE_FILE.exists():
+    cache_file = resolve_cache_file()
+    if cache_file.exists():
         try:
-            for line in CACHE_FILE.read_text(encoding="utf-8").splitlines():
+            for line in cache_file.read_text(encoding="utf-8").splitlines():
                 p = line.strip().strip('"')
                 if p and (Path(p) / GAME_EXE).exists():
-                    paths.append(p)
+                    paths.append(normalize_install_path(p))
                 else:
                     log.debug(f"[CACHE] Invalid or missing exe: {p}")
         except Exception as e:
@@ -757,20 +899,23 @@ def create_lod_bias_controls(parent_widget):
 
     slider = QSlider(Qt.Orientation.Horizontal)
     slider.setRange(-300, 1600)
-    slider.setValue(0)
+    initial_bias = get_saved_lod_bias()
+    slider.setValue(int(round(initial_bias * 100.0)))
 
     spinbox = QDoubleSpinBox()
     spinbox.setRange(-3.0, 16.0)
     spinbox.setSingleStep(0.1)
     spinbox.setDecimals(1)
-    spinbox.setValue(0.0)
+    spinbox.setValue(initial_bias)
 
     def sync_slider_from_spin():
         value = float(spinbox.value())
         slider.setValue(int(round(value * 100.0)))
+        set_saved_lod_bias(value)
 
     def sync_spin_from_slider(value: int):
         spinbox.setValue(value / 100.0)
+        set_saved_lod_bias(float(spinbox.value()))
 
     slider.valueChanged.connect(sync_spin_from_slider)
     spinbox.valueChanged.connect(sync_slider_from_spin)
@@ -1168,9 +1313,12 @@ def main():
     except Exception as exc:
         log.debug(f"[UPDATE] Automatic check failed: {exc}")
 
-    # 1) The app may be opened while the game is running; only mutation actions require it to be closed.
+    # 1) Offer to migrate any legacy local config/cache files into the stable AppData state.
+    prompt_legacy_state_migration()
 
-    # 2) Load cache or scan
+    # 2) The app may be opened while the game is running; only mutation actions require it to be closed.
+
+    # 3) Load cache or scan
     installs = load_cache()
     if not installs:
         if qt_yes_no("Scan for Installations",

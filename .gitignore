@@ -8,6 +8,7 @@ bdo_vulkan_manager.*/
 build*/
 *.zip
 *.spec
+nuitka-build*/
 
 # Ignore compiled Python files
 __pycache__/
@@ -19,3 +20,7 @@ BDOVulkanUtility.exe
 venv*/
 bdovulkan_config.ini
 bdovulkan_installs.txt
+
+
+# Ignore Nuitka Crash Report
+nuitka-crash-report.xml
