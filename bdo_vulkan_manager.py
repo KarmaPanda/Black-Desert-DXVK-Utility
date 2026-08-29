@@ -68,7 +68,8 @@ BUNDLED = resolve_bundle_mode()
 
 def resolve_appdata_state_dir() -> Path:
     """Store persisted settings in a stable per-user AppData directory so build/folder changes do not reset state."""
-    base = Path(os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local"))
+    base = Path(os.environ.get("LOCALAPPDATA") or str(
+        Path.home() / "AppData" / "Local"))
     return (base / "KarmaPanda" / "BDO_Vulkan_Utility").resolve(strict=False)
 
 
@@ -135,7 +136,8 @@ def migrate_legacy_state_file(legacy_path: Path | str, current_path: Path | str,
         log.debug(f"[STATE] Migrated legacy state file: {legacy} -> {current}")
         return True
     except Exception as exc:
-        log.debug(f"[STATE] Failed to migrate legacy state file: {legacy} -> {current}: {exc}")
+        log.debug(
+            f"[STATE] Failed to migrate legacy state file: {legacy} -> {current}: {exc}")
         return False
 
 
@@ -143,7 +145,8 @@ def prompt_legacy_state_migration():
     try:
         legacy_files = []
         if LEGACY_CONFIG_FILE.exists():
-            legacy_files.append((LEGACY_CONFIG_FILE, CONFIG_FILE, "configuration"))
+            legacy_files.append(
+                (LEGACY_CONFIG_FILE, CONFIG_FILE, "configuration"))
         if LEGACY_CACHE_FILE.exists():
             legacy_files.append((LEGACY_CACHE_FILE, CACHE_FILE, "cache"))
         if not legacy_files:
@@ -169,7 +172,8 @@ def prompt_legacy_state_migration():
             return
 
         for legacy, current, _ in legacy_files:
-            migrate_legacy_state_file(legacy, current, replace_existing=replace_existing)
+            migrate_legacy_state_file(
+                legacy, current, replace_existing=replace_existing)
     except Exception as exc:
         log.debug(f"[STATE] Legacy migration prompt failed: {exc}")
 
@@ -829,7 +833,8 @@ def resolve_cache_file() -> Path:
     """Resolve the active cache file in the current runtime tree without changing the app's scan behavior."""
     candidates = [
         CACHE_FILE,
-        Path(sys.executable).resolve().parent / "bdovulkan_installs.txt" if getattr(sys, "executable", None) else None,
+        Path(sys.executable).resolve().parent /
+        "bdovulkan_installs.txt" if getattr(sys, "executable", None) else None,
         APP_DIR / "bdovulkan_installs.txt",
     ]
 

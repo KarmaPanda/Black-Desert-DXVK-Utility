@@ -8,13 +8,16 @@ This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copy
 ## ✨ Features
 
 - **LOD bias control**: Use a slider/input to set `d3d11.samplerLodBias` from negative to positive values.
+- **Persistent LOD bias**: The selected sampler bias is saved to config and restored on the next launch.
 - **Automatic detection**: Scans all available drives for Black Desert installations.
 - **Multiple installs**: Supports managing files across multiple game folders.
 - **Copy / Remove**: Copy or replace Vulkan files, or remove them, all from one program.
 - **UAC-aware**: Prompts for administrator rights when the game is installed in protected directories.
 - **Safety check**: Refuses to run if Black Desert (`BlackDesert64.exe`) is currently running.
 - **Cache**: Remembers previously detected installations to avoid rescanning every time.
-- **Debug mode**: Toggle debug logging and console output via `bdovulkan_config.ini`.
+- **Portable state**: Configuration and install cache are kept in `%LOCALAPPDATA%\KarmaPanda\BDO_Vulkan_Utility` so builds/folders can share the same saved settings.
+- **Legacy migration**: If older local config/cache files are found, the app prompts to import them into AppData and delete the legacy copies.
+- **Debug mode**: Toggle debug logging and console output via the AppData config file.
 
 ---
 
@@ -22,7 +25,7 @@ This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copy
 
 1. Download the latest release or build it yourself (see **Build** section).
 2. Place the utility in a folder of your choice.
-3. (Optional) Place your consolidated Vulkan files under `assets` for bundled mode or under a custom source folder for non-bundled mode.
+3. (Optional) Place your consolidated [DXVK](https://github.com/doitsujin/DXVK) files under `assets` for non-bundled mode.
 
 ---
 
@@ -30,7 +33,7 @@ This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copy
 
 1. **Close Black Desert Online** (the tool will refuse to run if the game is open).
 2. Run the utility.
-3. Adjust the **sampler LOD bias** with the slider or number box.
+3. Adjust the **sampler LOD bias** with the slider or number box. The value is saved automatically and restored on the next launch.
 4. Select one or more detected BDO installation folders:
    - Use **Copy/Replace** to apply the Vulkan files.
    - Use **Remove** to delete them.
@@ -69,50 +72,91 @@ or another custom folder you select manually.
 
 ## ⚙️ Build
 
-This project uses **Python 3.11+** and **Tkinter** (comes with Python).
+This project targets **Windows** and expects a Python 3.12 environment with the following build dependencies available in the local virtual environment:
 
-Dependencies:
+- `PyQt6`
+- `PyInstaller`
+- `nuitka`
 
-- None beyond the Python standard library.
+The repo includes a build helper that creates or reuses `venv-py312` automatically and installs missing dependencies before compiling.
 
-### Use the included .bat files to compile (if you're on Windows)
+### Build helper
 
+From the project root, run:
+
+```bat
+build.bat
 ```
-build-bundled.bat
-build-non-bundled.bat
+
+or use one of the supported commands directly:
+
+```bat
+build.bat bundled
+build.bat bundled-pyinstaller
+build.bat bundled-nuitka
+build.bat nonbundled
+build.bat nonbundled-pyinstaller
+build.bat nonbundled-nuitka
 ```
 
-or DIY
+The helper script writes output to the `dist` folder and cleans temporary build artifacts after completion.
 
-### Non-bundled build (expects local `BDO_Vulkan_API` folders):
+### Manual PyInstaller examples
+
+#### Non-bundled build
 
 ```bash
 pyinstaller --onefile --windowed --icon BlackDesert.ico \
-  --add-data "BlackDesert.ico;." \
+  --distpath dist \
+  --workpath build \
+  --specpath build \
+  --name BDOVulkanUtility \
   bdo_vulkan_manager.py
 ```
 
-### Bundled build (includes the consolidated assets folder inside the exe):
+#### Bundled build
 
 ```bash
 pyinstaller --onefile --windowed --icon BlackDesert.ico \
-  --add-data "BlackDesert.ico;." \
+  --distpath dist \
+  --workpath build \
+  --specpath build \
   --add-data "assets;assets" \
+  --add-data "BlackDesert.ico;." \
+  --name BDOVulkanUtility \
   bdo_vulkan_manager.py
 ```
+
+> The bundled build embeds the `assets` folder into the executable, while the non-bundled build expects the `assets` directory to remain available next to the app or in a selected custom location.
+
+### Notes
+
+- The app uses `%LOCALAPPDATA%\KarmaPanda\BDO_Vulkan_Utility` for persistent config and install cache, so builds in different folders do not wipe the user state.
+- If older local config files are detected, the app offers to migrate them into the AppData folder automatically.
 
 ---
 
 ## 🛠 Configuration
 
-The tool generates bdovulkan_config.ini automatically:
+The tool stores persistent settings in a stable AppData folder so settings can survive different build locations or updates:
+
+```text
+%LOCALAPPDATA%\KarmaPanda\BDO_Vulkan_Utility\
+├── bdovulkan_config.ini
+└── bdovulkan_installs.txt
+```
+
+The config is generated automatically:
 
 ```ini
 [general]
 debug = false
+lod_bias = 0.0
 ```
 
-Set debug = true to enable detailed logging and a visible console window.
+Set `debug = true` to enable detailed logging and a visible console window.
+
+If older local copies of `bdovulkan_config.ini` or `bdovulkan_installs.txt` are found in the program folder, the application will prompt to import them into AppData and delete the legacy copies.
 
 ---
 
