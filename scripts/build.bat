@@ -161,16 +161,19 @@ cd /d "%ROOT_DIR%"
   --noinclude-unittest-mode=nofollow ^
   --mingw64 ^
   --windows-icon-from-ico="%ICON_PATH%" ^
-  --include-data-files=assets/d3d11.dll=assets/d3d11.dll ^
-  --include-data-files=assets/dxgi.dll=assets/dxgi.dll ^
-  --include-data-files=assets/dxvk.conf=assets/dxvk.conf ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\d3d11.dll=assets/dxvk/d3d11.dll" ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\dxgi.dll=assets/dxvk/dxgi.dll" ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\dxvk.conf=assets/dxvk/dxvk.conf" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\d3d12.dll=assets/vkd3d-proton/d3d12.dll" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\d3d12core.dll=assets/vkd3d-proton/d3d12core.dll" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\vkd3d-proton.conf=assets/vkd3d-proton/vkd3d-proton.conf" ^
   --include-data-files="%ICON_PATH%=BlackDesert.ico" ^
   --include-data-files=app.manifest=app.manifest ^
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
   --product-name="Black Desert Vulkan Utility" ^
-  --file-version=1.0.1.0 ^
-  --product-version=1.0.1.0 ^
+  --file-version=1.0.3.0 ^
+  --product-version=1.0.3.0 ^
   --file-description="Black Desert Online Vulkan/DXVK Manager" ^
   --copyright="Copyright (c) 2025 KarmaPanda" ^
   --trademarks="Black Desert Online is a trademark of Pearl Abyss" ^
@@ -266,14 +269,19 @@ cd /d "%ROOT_DIR%"
   --noinclude-unittest-mode=nofollow ^
   --mingw64 ^
   --windows-icon-from-ico="%ICON_PATH%" ^
-  --include-data-dir=assets=assets ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\d3d11.dll=assets/dxvk/d3d11.dll" ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\dxgi.dll=assets/dxvk/dxgi.dll" ^
+  --include-data-files="%ROOT_DIR%assets\dxvk\dxvk.conf=assets/dxvk/dxvk.conf" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\d3d12.dll=assets/vkd3d-proton/d3d12.dll" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\d3d12core.dll=assets/vkd3d-proton/d3d12core.dll" ^
+  --include-data-files="%ROOT_DIR%assets\vkd3d-proton\vkd3d-proton.conf=assets/vkd3d-proton/vkd3d-proton.conf" ^
   --include-data-files="%ICON_PATH%=BlackDesert.ico" ^
   --include-data-files=app.manifest=app.manifest ^
   --output-filename=BDOVulkanUtility.exe ^
   --company-name=KarmaPanda ^
   --product-name="Black Desert Vulkan Utility" ^
-  --file-version=1.0.1.0 ^
-  --product-version=1.0.1.0 ^
+  --file-version=1.0.3.0 ^
+  --product-version=1.0.3.0 ^
   --file-description="Black Desert Online Vulkan/DXVK Manager" ^
   --copyright="Copyright (c) 2025 KarmaPanda" ^
   --trademarks="Black Desert Online is a trademark of Pearl Abyss" ^

@@ -1,5 +1,5 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.3",
   "download_url": "https://github.com/KarmaPanda/Black-Desert-DXVK-Utility/releases",
-  "notes": "Release 1.0.1: CI build and release workflow reliability fixes, including non-bundled icon path handling and source packaging fixes."
+  "notes": "Release 1.0.3: Added DXVK/VKD3D-Proton profile flow updates and version synchronization improvements."
 }

@@ -1,7 +1,7 @@
 # Black Desert Online Vulkan Utility — by KarmaPanda
 
-A Windows desktop utility to easily copy and replace DXVK files into the **Black Desert Online (BDO)** folder.  
-This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copying the consolidated Vulkan asset files into your Black Desert installation.
+A Windows desktop utility to easily copy and replace Vulkan translation-layer files into the **Black Desert Online (BDO)** folder.  
+This tool provides a simple GUI for choosing either DXVK (DX11) or VKD3D-Proton (DX12), adjusting DXVK sampler LOD bias when applicable, and copying the selected payload into your Black Desert installation.
 
 ---
 
@@ -9,6 +9,7 @@ This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copy
 
 - **LOD bias control**: Use a slider/input to set `d3d11.samplerLodBias` from negative to positive values.
 - **Persistent LOD bias**: The selected sampler bias is saved to config and restored on the next launch.
+- **Translation layer selector**: Choose DXVK (for DX11) or VKD3D-Proton (for DX12).
 - **Automatic detection**: Scans all available drives for Black Desert installations.
 - **Multiple installs**: Supports managing files across multiple game folders.
 - **Copy / Remove**: Copy or replace Vulkan files, or remove them, all from one program.
@@ -33,11 +34,16 @@ This tool provides a simple GUI for adjusting the DXVK sampler LOD bias and copy
 
 1. **Close Black Desert Online** (the tool will refuse to run if the game is open).
 2. Run the utility.
-3. Adjust the **sampler LOD bias** with the slider or number box. The value is saved automatically and restored on the next launch.
-4. Select one or more detected BDO installation folders:
+3. Choose the **translation layer**:
+
+- **DXVK (DX11 -> Vulkan)**
+- **VKD3D-Proton (DX12 -> Vulkan)**
+
+4. If DXVK is selected, adjust the **sampler LOD bias** with the slider or number box. The value is saved automatically and restored on the next launch.
+5. Select one or more detected BDO installation folders:
    - Use **Copy/Replace** to apply the Vulkan files.
    - Use **Remove** to delete them.
-5. Done!
+6. Done!
 
 ---
 
@@ -47,11 +53,14 @@ The application can run in two modes:
 
 ### 🔹 Non-Bundled Mode
 
-- The Vulkan files are expected in a single source folder such as:
+- The Vulkan files are expected in a source folder such as `assets`, or profile subfolders such as:
 
 ```
-./assets
+./assets/dxvk
+./assets/vkd3d-proton
 ```
+
+- Backward compatibility is preserved: a flat `assets` folder is still supported.
 
 or another custom folder you select manually.
 
@@ -67,6 +76,24 @@ or another custom folder you select manually.
 - This keeps the application directory clean with no leftover assets.
 
 > Switch between bundled and non-bundled mode by editing the `BUNDLED` flag at the top of `bdo_vulkan_manager.py`.
+
+## 🧩 Asset Layout For DX12 Prep
+
+Recommended structure to support both current DX11 and upcoming DX12 paths:
+
+```text
+assets/
+├── dxvk/
+│   ├── d3d11.dll
+│   ├── dxgi.dll
+│   └── dxvk.conf
+└── vkd3d-proton/
+  ├── d3d12.dll
+  ├── d3d12core.dll (optional, include when provided)
+  └── dxgi.dll (optional depending on your chosen package)
+```
+
+If your package ships files differently, place the VKD3D-Proton DLLs in any folder and select that folder manually when prompted.
 
 ---
 

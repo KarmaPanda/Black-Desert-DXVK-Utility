@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1"
   manifestVersion="1.0">
-  <assemblyIdentity version="1.0.1.0"
+  <assemblyIdentity version="1.0.3.0"
     name="BDOVulkanUtility.app"
     type="win32" />
   <description>Black Desert Vulkan Utility</description>
